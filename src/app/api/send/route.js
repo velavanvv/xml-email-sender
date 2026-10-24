@@ -191,6 +191,74 @@ export async function POST(req) {
       return NextResponse.json({ success: true, provider: "smtp", results });
     }
 
+    // 4. MAILCHIMP TRANSACTIONAL (MANDRILL) with Private Domain
+    if (provider === "mailchimp") {
+      const apiKey = body.mailchimpApiKey || process.env.MAILCHIMP_API_KEY;
+      if (!apiKey) {
+        return NextResponse.json({
+          error: "Mailchimp Transactional API Key is missing. Please enter your key in Gateway Settings."
+        }, { status: 400 });
+      }
+
+      const senderEmail = fromEmail && fromEmail.trim() ? fromEmail.trim() : "";
+      if (!senderEmail || !senderEmail.includes("@")) {
+        return NextResponse.json({
+          error: "A verified Private Domain Sender Email is required for Mailchimp (e.g. billing@yourprivatedomain.com)."
+        }, { status: 400 });
+      }
+
+      // Mandrill (Mailchimp Transactional) SMTP relay
+      const transporter = nodemailer.createTransport({
+        host: "smtp.mandrillapp.com",
+        port: 587,
+        secure: false,
+        auth: {
+          user: "mandrill_relay",
+          pass: apiKey.trim(),
+        },
+      });
+
+      for (const record of records) {
+        try {
+          const subject = useCommonBody && commonSubject ? interpolate(commonSubject, record) : (record.subject || "Notification");
+          const emailContent = useCommonBody && commonBodyTemplate ? interpolate(commonBodyTemplate, record) : record.message;
+
+          const mailOptions = {
+            from: `"${fromName}" <${senderEmail}>`,
+            to: record.recipient_email,
+            subject: subject,
+            text: emailContent,
+            html: `<div style="font-family: sans-serif; line-height: 1.5; color: #1e293b;">${emailContent.replace(/\n/g, "<br/>")}</div>`,
+          };
+
+          if (record.attachment_path && record.attachment_path.startsWith("http")) {
+            mailOptions.attachments = [
+              {
+                path: record.attachment_path,
+                filename: record.attachment_path.split("/").pop() || "document.pdf",
+              }
+            ];
+          }
+
+          const info = await transporter.sendMail(mailOptions);
+          results.push({
+            id: record.id,
+            status: "sent",
+            status_message: `Delivered via Mailchimp (${info.messageId})`,
+            sent_at: new Date().toISOString(),
+          });
+        } catch (err) {
+          results.push({
+            id: record.id,
+            status: "failed",
+            status_message: `Mailchimp error: ${err.message}`,
+          });
+        }
+      }
+
+      return NextResponse.json({ success: true, provider: "mailchimp", results });
+    }
+
     return NextResponse.json({ error: "Unknown provider" }, { status: 400 });
   } catch (err) {
     console.error("Send route error:", err);

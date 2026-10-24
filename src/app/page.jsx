@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import {
   UploadCloud,
   FileText,
@@ -23,45 +23,50 @@ import {
   Check,
   ChevronDown,
   Info,
+  Database,
+  RotateCcw,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
+const DEFAULT_DEMO_RECORDS = [
+  {
+    id: "rec_demo_1",
+    recipient_email: "alex.turner@example.com",
+    subject: "Monthly Statement - October 2026",
+    message: "Hi Alex, please find your monthly summary statement attached.",
+    attachment_path: "/invoices/2026/alex_october_invoice.pdf",
+    extra_fields: { name: "Alex Turner", account_no: "ACC-8921" },
+    status: "pending",
+    status_message: "",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "rec_demo_2",
+    recipient_email: "sarah.jenkins@acmecorp.io",
+    subject: "Contract Agreement & Verification",
+    message: "Dear Sarah, attached is the revised NDA and service contract.",
+    attachment_path: "https://example.com/docs/signed_contract.pdf",
+    extra_fields: { name: "Sarah Jenkins", company: "Acme Corp" },
+    status: "pending",
+    status_message: "",
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "rec_demo_3",
+    recipient_email: "billing@globex.org",
+    subject: "Payment Reminder #542",
+    message: "Hello team, kindly process invoice #542 due on October 30.",
+    attachment_path: "/receipts/globex_542.pdf",
+    extra_fields: { name: "Globex Accounts", po_number: "PO-7741" },
+    status: "pending",
+    status_message: "",
+    created_at: new Date().toISOString(),
+  },
+];
+
 export default function EmailDashboard() {
-  const [records, setRecords] = useState([
-    {
-      id: "rec_demo_1",
-      recipient_email: "alex.turner@example.com",
-      subject: "Monthly Statement - October 2026",
-      message: "Hi Alex, please find your monthly summary statement attached.",
-      attachment_path: "/invoices/2026/alex_october_invoice.pdf",
-      extra_fields: { name: "Alex Turner", account_no: "ACC-8921" },
-      status: "pending",
-      status_message: "",
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: "rec_demo_2",
-      recipient_email: "sarah.jenkins@acmecorp.io",
-      subject: "Contract Agreement & Verification",
-      message: "Dear Sarah, attached is the revised NDA and service contract.",
-      attachment_path: "https://example.com/docs/signed_contract.pdf",
-      extra_fields: { name: "Sarah Jenkins", company: "Acme Corp" },
-      status: "pending",
-      status_message: "",
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: "rec_demo_3",
-      recipient_email: "billing@globex.org",
-      subject: "Payment Reminder #542",
-      message: "Hello team, kindly process invoice #542 due on October 30.",
-      attachment_path: "/receipts/globex_542.pdf",
-      extra_fields: { name: "Globex Accounts", po_number: "PO-7741" },
-      status: "pending",
-      status_message: "",
-      created_at: new Date().toISOString(),
-    },
-  ]);
+  const [records, setRecords] = useState(DEFAULT_DEMO_RECORDS);
+  const [isClientLoaded, setIsClientLoaded] = useState(false);
 
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUploading, setIsUploading] = useState(false);
@@ -75,16 +80,59 @@ export default function EmailDashboard() {
   const [commonBody, setCommonBody] = useState("Dear {name},\n\nPlease find your official documents attached below.\n\nThank you,\nClient Dispatch Team");
 
   // Provider configuration
-  const [provider, setProvider] = useState("simulation"); // simulation, resend, smtp
+  const [provider, setProvider] = useState("simulation"); // simulation, mailchimp, resend, smtp
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [resendKey, setResendKey] = useState("");
   const [resendFromEmail, setResendFromEmail] = useState("onboarding@resend.dev");
+
+  // Mailchimp (Mandrill) private domain state
+  const [mailchimpApiKey, setMailchimpApiKey] = useState("");
+  const [mailchimpFromEmail, setMailchimpFromEmail] = useState("");
+  const [mailchimpFromName, setMailchimpFromName] = useState("Company Accounts");
+
   const [smtpSettings, setSmtpSettings] = useState({
     host: "smtp.gmail.com",
     port: "587",
     user: "",
     pass: "",
   });
+
+  // Load saved state from LocalStorage on mount
+  useEffect(() => {
+    setIsClientLoaded(true);
+    try {
+      const saved = localStorage.getItem("xml_dispatch_records");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRecords(parsed);
+        }
+      }
+      const savedCfg = localStorage.getItem("xml_dispatch_config");
+      if (savedCfg) {
+        const cfg = JSON.parse(savedCfg);
+        if (cfg.provider) setProvider(cfg.provider);
+        if (cfg.resendKey) setResendKey(cfg.resendKey);
+        if (cfg.resendFromEmail) setResendFromEmail(cfg.resendFromEmail);
+        if (cfg.mailchimpApiKey) setMailchimpApiKey(cfg.mailchimpApiKey);
+        if (cfg.mailchimpFromEmail) setMailchimpFromEmail(cfg.mailchimpFromEmail);
+        if (cfg.mailchimpFromName) setMailchimpFromName(cfg.mailchimpFromName);
+        if (cfg.smtpSettings) setSmtpSettings(cfg.smtpSettings);
+      }
+    } catch (e) {
+      console.warn("Could not read from local storage", e);
+    }
+  }, []);
+
+  // Save records to LocalStorage whenever records change
+  useEffect(() => {
+    if (!isClientLoaded) return;
+    try {
+      localStorage.setItem("xml_dispatch_records", JSON.stringify(records));
+    } catch (e) {
+      console.warn("Could not save records to local storage", e);
+    }
+  }, [records, isClientLoaded]);
 
   // Manual Add/Edit Modal
   const [showModal, setShowModal] = useState(false);
@@ -326,7 +374,9 @@ export default function EmailDashboard() {
           records: targetRecords,
           provider,
           resendApiKey: resendKey,
-          fromEmail: resendFromEmail,
+          fromEmail: provider === "mailchimp" ? mailchimpFromEmail : resendFromEmail,
+          fromName: provider === "mailchimp" ? mailchimpFromName : "Dispatch Team",
+          mailchimpApiKey,
           smtpConfig: provider === "smtp" ? smtpSettings : null,
           useCommonBody,
           commonSubject,
@@ -574,6 +624,25 @@ export default function EmailDashboard() {
                 Clear All
               </button>
             )}
+
+            <button
+              onClick={() => {
+                if (confirm("Reset back to default sample records?")) {
+                  setRecords(DEFAULT_DEMO_RECORDS);
+                  setSelectedIds(new Set());
+                }
+              }}
+              className="text-xs text-slate-400 hover:text-brand-300 px-2 py-1 transition flex items-center gap-1"
+              title="Reset back to sample records"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset Demo</span>
+            </button>
+
+            <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-slate-400 bg-slate-800/40 px-2 py-1 rounded-md border border-slate-800">
+              <Database className="w-3 h-3 text-emerald-400" />
+              <span>Auto-saved in storage</span>
+            </span>
           </div>
 
           {/* Right Actions: Filters & Send Trigger */}
@@ -919,9 +988,10 @@ export default function EmailDashboard() {
               Choose between Instant Simulator for live client demos, Resend free API (3,000/mo), or your custom SMTP.
             </p>
 
-            <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
               {[
-                { id: "simulation", name: "Simulator", desc: "No API key needed (Demo)" },
+                { id: "simulation", name: "Simulator", desc: "No API key (Demo)" },
+                { id: "mailchimp", name: "Mailchimp", desc: "Private Domain (Mandrill)" },
                 { id: "resend", name: "Resend", desc: "3,000 emails/mo Free" },
                 { id: "smtp", name: "SMTP", desc: "Gmail / Brevo / Custom" },
               ].map((p) => (
@@ -929,14 +999,14 @@ export default function EmailDashboard() {
                   key={p.id}
                   type="button"
                   onClick={() => setProvider(p.id)}
-                  className={`p-3 rounded-xl border text-left transition ${
+                  className={`p-2.5 rounded-xl border text-left transition ${
                     provider === p.id
-                      ? "border-brand-500 bg-brand-950/40 text-white"
+                      ? "border-brand-500 bg-brand-950/40 text-white shadow-md shadow-brand-500/10"
                       : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700"
                   }`}
                 >
                   <div className="text-xs font-semibold capitalize text-slate-200">{p.name}</div>
-                  <div className="text-[10px] text-slate-500 mt-1">{p.desc}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5 line-clamp-2">{p.desc}</div>
                 </button>
               ))}
             </div>
@@ -944,6 +1014,60 @@ export default function EmailDashboard() {
             {provider === "simulation" && (
               <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-800/30 text-amber-200/90 text-xs">
                 <strong>Demo Mode Active:</strong> Allows the client to test the full XML upload, template editing, and batch send experience right away without needing email API credentials.
+              </div>
+            )}
+
+            {provider === "mailchimp" && (
+              <div className="space-y-3 text-xs">
+                <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-800/40 text-indigo-200 text-xs">
+                  <strong>Mailchimp Transactional (Mandrill) Ready:</strong> Send high-volume emails with your own private verified domain using Mailchimp's transactional infrastructure.
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Mailchimp Transactional (Mandrill) API Key *</label>
+                  <input
+                    type="password"
+                    value={mailchimpApiKey}
+                    onChange={(e) => setMailchimpApiKey(e.target.value)}
+                    placeholder="md-xxxxxxxxxxxxxxxxxxxx"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 font-mono"
+                  />
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    Created in Mailchimp Transactional (Mandrill) &gt; Settings &gt; API Keys.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">Private Domain Sender Email *</label>
+                    <input
+                      type="email"
+                      value={mailchimpFromEmail}
+                      onChange={(e) => setMailchimpFromEmail(e.target.value)}
+                      placeholder="billing@yourprivatedomain.com"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1">From Sender Name</label>
+                    <input
+                      type="text"
+                      value={mailchimpFromName}
+                      onChange={(e) => setMailchimpFromName(e.target.value)}
+                      placeholder="e.g. Accounts Department"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/80 text-[11px] text-slate-300 space-y-1">
+                  <p className="font-semibold text-white">Private Domain Verification Checklist:</p>
+                  <ul className="list-disc list-inside space-y-0.5 text-slate-400">
+                    <li>Add your domain in Mailchimp &gt; Domains</li>
+                    <li>Add the 2 TXT DNS records (DKIM and SPF) on your domain registrar (GoDaddy, Namecheap, Cloudflare, etc.)</li>
+                    <li>Once verified in Mailchimp, your emails will pass DMARC and land in recipients' <strong>Primary Inboxes</strong>.</li>
+                  </ul>
+                </div>
               </div>
             )}
 
@@ -1034,10 +1158,28 @@ export default function EmailDashboard() {
             <div className="flex justify-end gap-2 mt-5 pt-3 border-t border-slate-800 text-xs">
               <button
                 type="button"
-                onClick={() => setShowConfigModal(false)}
+                onClick={() => {
+                  try {
+                    localStorage.setItem(
+                      "xml_dispatch_config",
+                      JSON.stringify({
+                        provider,
+                        resendKey,
+                        resendFromEmail,
+                        mailchimpApiKey,
+                        mailchimpFromEmail,
+                        mailchimpFromName,
+                        smtpSettings,
+                      })
+                    );
+                  } catch (e) {
+                    console.warn(e);
+                  }
+                  setShowConfigModal(false);
+                }}
                 className="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium"
               >
-                Done
+                Save & Close
               </button>
             </div>
           </div>
