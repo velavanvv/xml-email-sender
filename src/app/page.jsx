@@ -78,6 +78,7 @@ export default function EmailDashboard() {
   const [provider, setProvider] = useState("simulation"); // simulation, resend, smtp
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [resendKey, setResendKey] = useState("");
+  const [resendFromEmail, setResendFromEmail] = useState("onboarding@resend.dev");
   const [smtpSettings, setSmtpSettings] = useState({
     host: "smtp.gmail.com",
     port: "587",
@@ -325,6 +326,7 @@ export default function EmailDashboard() {
           records: targetRecords,
           provider,
           resendApiKey: resendKey,
+          fromEmail: resendFromEmail,
           smtpConfig: provider === "smtp" ? smtpSettings : null,
           useCommonBody,
           commonSubject,
@@ -759,12 +761,18 @@ export default function EmailDashboard() {
                             </span>
                           )}
                           {r.status === "failed" && (
-                            <span
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-medium text-[10px] border border-rose-500/30 cursor-pointer"
-                              title={r.status_message}
-                            >
-                              <AlertCircle className="w-3 h-3" /> Failed
-                            </span>
+                            <div className="space-y-1">
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-medium text-[10px] border border-rose-500/30"
+                              >
+                                <AlertCircle className="w-3 h-3 text-rose-400" /> Failed
+                              </span>
+                              {r.status_message && (
+                                <p className="text-[10px] text-rose-300 bg-rose-950/40 p-1.5 rounded border border-rose-900/40 max-w-xs leading-tight">
+                                  {r.status_message}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </td>
 
@@ -948,11 +956,30 @@ export default function EmailDashboard() {
                     value={resendKey}
                     onChange={(e) => setResendKey(e.target.value)}
                     placeholder="re_xxxxxxxxxxxxxx"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">From Sender Email</label>
+                  <input
+                    type="text"
+                    value={resendFromEmail}
+                    onChange={(e) => setResendFromEmail(e.target.value)}
+                    placeholder="onboarding@resend.dev or alerts@yourdomain.com"
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500"
                   />
-                  <span className="text-[10px] text-slate-500 mt-1 block">
-                    Get a free key from resend.com (3,000 free emails/mo).
-                  </span>
+                  <div className="p-2.5 mt-2 rounded-lg bg-amber-950/30 border border-amber-800/40 text-amber-200/90 text-[11px] space-y-1">
+                    <p className="font-semibold flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" /> Why did you see a 403 error?
+                    </p>
+                    <p>
+                      Resend's default <code>onboarding@resend.dev</code> only sends emails to <strong>the email address you used to register on Resend</strong>.
+                    </p>
+                    <p>
+                      To send to <strong>any</strong> email (like client inboxes), you must verify your own domain in Resend (<a href="https://resend.com/domains" target="_blank" rel="noreferrer" className="underline text-brand-300">resend.com/domains</a>), <strong>OR</strong> simply switch to <strong>SMTP (Gmail / Brevo)</strong> above!
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

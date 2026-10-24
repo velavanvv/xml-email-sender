@@ -71,11 +71,12 @@ export async function POST(req) {
       const apiKey = resendApiKey || process.env.RESEND_API_KEY;
       if (!apiKey) {
         return NextResponse.json({
-          error: "Resend API key missing. Please provide a key or switch to Simulation mode."
+          error: "Resend API key missing. Please provide a key in Gateway Settings or switch to Simulator/SMTP."
         }, { status: 400 });
       }
 
       const resend = new Resend(apiKey);
+      const senderEmail = fromEmail && fromEmail.trim() ? fromEmail.trim() : "onboarding@resend.dev";
 
       for (const record of records) {
         try {
@@ -83,7 +84,7 @@ export async function POST(req) {
           const emailContent = useCommonBody && commonBodyTemplate ? interpolate(commonBodyTemplate, record) : record.message;
 
           const emailPayload = {
-            from: `${fromName} <${fromEmail}>`,
+            from: `${fromName} <${senderEmail}>`,
             to: record.recipient_email,
             subject: subject,
             html: `<div style="font-family: sans-serif; line-height: 1.5; color: #1e293b;">${emailContent.replace(/\n/g, "<br/>")}</div>`,
@@ -101,10 +102,14 @@ export async function POST(req) {
 
           const response = await resend.emails.send(emailPayload);
           if (response.error) {
+            let errorMsg = response.error.message || "Resend dispatch failed.";
+            if (response.error.statusCode === 403 || errorMsg.includes("testing emails to your own email")) {
+              errorMsg = "403 Forbidden: Resend's free onboarding@resend.dev only allows sending to your own registered Resend email. To send to any email address, verify a custom domain in Resend, or use Gmail SMTP.";
+            }
             results.push({
               id: record.id,
               status: "failed",
-              status_message: response.error.message || "Resend dispatch failed.",
+              status_message: errorMsg,
             });
           } else {
             results.push({
@@ -115,10 +120,14 @@ export async function POST(req) {
             });
           }
         } catch (err) {
+          let errorMsg = err.message;
+          if (err.statusCode === 403 || errorMsg.includes("403")) {
+            errorMsg = "403 Forbidden: Resend's free onboarding@resend.dev only allows sending to your own registered Resend email. To send to any email, verify your domain in Resend, or switch to Gmail SMTP.";
+          }
           results.push({
             id: record.id,
             status: "failed",
-            status_message: err.message,
+            status_message: errorMsg,
           });
         }
       }
