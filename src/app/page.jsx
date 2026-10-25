@@ -85,7 +85,7 @@ export default function EnterpriseEmailDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [batchFilter, setBatchFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("");
 
   // Interpolation helper for preview and template placeholders
   const interpolate = (template, item) => {
@@ -230,17 +230,25 @@ export default function EnterpriseEmailDashboard() {
       const matchesBatch = batchFilter === "all" ? true : r.batch_name === batchFilter;
 
       const matchesDate =
-        dateFilter === "all"
+        !dateFilter || dateFilter === "all"
           ? true
           : (() => {
-              const d = r.sent_at || r.created_at;
-              if (!d) return false;
-              const dateStr = new Date(d).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              });
-              return dateStr === dateFilter;
+              const toYMD = (val) => {
+                if (!val) return "";
+                try {
+                  const d = new Date(val);
+                  if (isNaN(d.getTime())) return "";
+                  const y = d.getFullYear();
+                  const m = String(d.getMonth() + 1).padStart(2, "0");
+                  const day = String(d.getDate()).padStart(2, "0");
+                  return `${y}-${m}-${day}`;
+                } catch (e) {
+                  return "";
+                }
+              };
+              const sentYMD = toYMD(r.sent_at);
+              const createdYMD = toYMD(r.created_at);
+              return sentYMD === dateFilter || createdYMD === dateFilter;
             })();
 
       return matchesSearch && matchesStatus && matchesBatch && matchesDate;
@@ -859,21 +867,46 @@ export default function EnterpriseEmailDashboard() {
               </select>
             )}
 
-            {/* Date Filter */}
-            {uniqueDates.length > 0 && (
-              <select
+            {/* Interactive Calendar Date Picker */}
+            <div className={`flex items-center gap-1.5 bg-white border ${dateFilter ? "border-[#1a73e8] bg-[#f8fafd] ring-1 ring-[#1a73e8]" : "border-[#dadce0] hover:border-[#bdc1c6]"} focus-within:border-[#1a73e8] focus-within:ring-1 focus-within:ring-[#1a73e8] rounded-md px-2.5 py-1 text-xs text-[#3c4043] transition-all shadow-xs`}>
+              <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${dateFilter ? "text-[#1a73e8]" : "text-[#5f6368]"}`} />
+              <label htmlFor="calendar-date-input" className="text-[11px] font-medium text-[#70757a] hidden sm:inline">
+                Date:
+              </label>
+              <input
+                id="calendar-date-input"
+                type="date"
                 value={dateFilter}
                 onChange={(e) => setDateFilter(e.target.value)}
-                className="bg-white border border-[#dadce0] rounded-md px-2.5 py-1.5 text-xs text-[#3c4043] focus:outline-none focus:border-[#1a73e8] max-w-[150px] truncate"
-              >
-                <option value="all">📅 All Dates ({uniqueDates.length})</option>
-                {uniqueDates.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            )}
+                title="Select any date to filter emails"
+                className="bg-transparent text-xs text-[#202124] focus:outline-none cursor-pointer"
+              />
+              {dateFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setDateFilter("")}
+                  title="Clear date filter (show all dates)"
+                  className="p-0.5 text-[#70757a] hover:text-[#202124] hover:bg-[#e8f0fe] rounded transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = new Date();
+                    const y = today.getFullYear();
+                    const m = String(today.getMonth() + 1).padStart(2, "0");
+                    const d = String(today.getDate()).padStart(2, "0");
+                    setDateFilter(`${y}-${m}-${d}`);
+                  }}
+                  title="Filter by Today's date"
+                  className="text-[10px] text-[#1a73e8] hover:underline font-medium px-1.5 py-0.5 bg-[#e8f0fe] rounded ml-0.5"
+                >
+                  Today
+                </button>
+              )}
+            </div>
 
             {/* Status Filter */}
             <select
@@ -981,10 +1014,32 @@ export default function EnterpriseEmailDashboard() {
                     <td colSpan={9} className="py-12 text-center text-[#5f6368]">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <FileCode className="w-8 h-8 text-[#9aa0a6]" />
-                        <p className="text-sm font-medium text-[#202124]">No records in current view</p>
-                        <p className="text-xs text-[#5f6368]">
-                          Upload an XML file or click "Manual Entry" above to add recipient data.
+                        <p className="text-sm font-medium text-[#202124]">
+                          {dateFilter || searchQuery || statusFilter !== "all" || batchFilter !== "all"
+                            ? "No records match the active filters"
+                            : "No records in current view"}
                         </p>
+                        <p className="text-xs text-[#5f6368] max-w-md">
+                          {dateFilter && `Selected date: ${dateFilter}. `}
+                          {dateFilter || searchQuery || statusFilter !== "all" || batchFilter !== "all"
+                            ? "Try clearing or selecting a different date/filter to see your emails."
+                            : "Upload an XML file or click \"Manual Entry\" above to add recipient data."}
+                        </p>
+                        {(dateFilter || searchQuery || statusFilter !== "all" || batchFilter !== "all") && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDateFilter("");
+                              setSearchQuery("");
+                              setStatusFilter("all");
+                              setBatchFilter("all");
+                            }}
+                            className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white border border-[#dadce0] hover:bg-[#f8f9fa] text-xs font-medium text-[#1a73e8] transition-colors shadow-xs"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Reset All Filters</span>
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
