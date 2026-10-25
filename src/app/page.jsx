@@ -85,7 +85,8 @@ export default function EnterpriseEmailDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [batchFilter, setBatchFilter] = useState("all");
-  const [dateFilter, setDateFilter] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   // Interpolation helper for preview and template placeholders
   const interpolate = (template, item) => {
@@ -189,24 +190,6 @@ export default function EnterpriseEmailDashboard() {
     return { total, sent, failed, pending };
   }, [records]);
 
-  // Unique dates for date-wise tracking
-  const uniqueDates = useMemo(() => {
-    const dates = new Set();
-    records.forEach((r) => {
-      const d = r.sent_at || r.created_at;
-      if (d) {
-        try {
-          const dateStr = new Date(d).toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          });
-          dates.add(dateStr);
-        } catch (e) {}
-      }
-    });
-    return Array.from(dates);
-  }, [records]);
 
   // Unique XML batches for daily separation
   const uniqueBatches = useMemo(() => {
@@ -229,31 +212,39 @@ export default function EnterpriseEmailDashboard() {
       const matchesStatus = statusFilter === "all" ? true : r.status === statusFilter;
       const matchesBatch = batchFilter === "all" ? true : r.batch_name === batchFilter;
 
-      const matchesDate =
-        !dateFilter || dateFilter === "all"
-          ? true
-          : (() => {
-              const toYMD = (val) => {
-                if (!val) return "";
-                try {
-                  const d = new Date(val);
-                  if (isNaN(d.getTime())) return "";
-                  const y = d.getFullYear();
-                  const m = String(d.getMonth() + 1).padStart(2, "0");
-                  const day = String(d.getDate()).padStart(2, "0");
-                  return `${y}-${m}-${day}`;
-                } catch (e) {
-                  return "";
-                }
-              };
-              const sentYMD = toYMD(r.sent_at);
-              const createdYMD = toYMD(r.created_at);
-              return sentYMD === dateFilter || createdYMD === dateFilter;
-            })();
+      const matchesDate = (() => {
+        if (!startDate && !endDate) return true;
+        const toYMD = (val) => {
+          if (!val) return "";
+          try {
+            const d = new Date(val);
+            if (isNaN(d.getTime())) return "";
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, "0");
+            const day = String(d.getDate()).padStart(2, "0");
+            return `${y}-${m}-${day}`;
+          } catch (e) {
+            return "";
+          }
+        };
+
+        const sentYMD = toYMD(r.sent_at);
+        const createdYMD = toYMD(r.created_at);
+
+        const inRange = (dStr) => {
+          if (!dStr) return false;
+          if (startDate && endDate) return dStr >= startDate && dStr <= endDate;
+          if (startDate) return dStr >= startDate;
+          if (endDate) return dStr <= endDate;
+          return true;
+        };
+
+        return inRange(sentYMD) || inRange(createdYMD);
+      })();
 
       return matchesSearch && matchesStatus && matchesBatch && matchesDate;
     });
-  }, [records, searchQuery, statusFilter, batchFilter, dateFilter]);
+  }, [records, searchQuery, statusFilter, batchFilter, startDate, endDate]);
 
   // XML File Upload
   const handleXmlUpload = async (file) => {
@@ -867,26 +858,58 @@ export default function EnterpriseEmailDashboard() {
               </select>
             )}
 
-            {/* Interactive Calendar Date Picker */}
-            <div className={`flex items-center gap-1.5 bg-white border ${dateFilter ? "border-[#1a73e8] bg-[#f8fafd] ring-1 ring-[#1a73e8]" : "border-[#dadce0] hover:border-[#bdc1c6]"} focus-within:border-[#1a73e8] focus-within:ring-1 focus-within:ring-[#1a73e8] rounded-md px-2.5 py-1 text-xs text-[#3c4043] transition-all shadow-xs`}>
-              <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${dateFilter ? "text-[#1a73e8]" : "text-[#5f6368]"}`} />
-              <label htmlFor="calendar-date-input" className="text-[11px] font-medium text-[#70757a] hidden sm:inline">
-                Date:
-              </label>
-              <input
-                id="calendar-date-input"
-                type="date"
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-                title="Select any date to filter emails"
-                className="bg-transparent text-xs text-[#202124] focus:outline-none cursor-pointer"
+            {/* Date Range Picker (Between Start & End) */}
+            <div
+              className={`flex items-center gap-1.5 bg-white border ${
+                startDate || endDate
+                  ? "border-[#1a73e8] bg-[#f8fafd] ring-1 ring-[#1a73e8]"
+                  : "border-[#dadce0] hover:border-[#bdc1c6]"
+              } focus-within:border-[#1a73e8] focus-within:ring-1 focus-within:ring-[#1a73e8] rounded-md px-2.5 py-1 text-xs text-[#3c4043] transition-all shadow-xs`}
+            >
+              <Calendar
+                className={`w-3.5 h-3.5 flex-shrink-0 ${
+                  startDate || endDate ? "text-[#1a73e8]" : "text-[#5f6368]"
+                }`}
               />
-              {dateFilter ? (
+
+              {/* Start Date */}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-medium text-[#70757a]">From:</span>
+                <input
+                  id="date-filter-start"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  title="Filter from Start Date"
+                  className="bg-transparent text-xs text-[#202124] focus:outline-none cursor-pointer max-w-[110px]"
+                />
+              </div>
+
+              <span className="text-[#9aa0a6] font-medium text-xs px-0.5">to</span>
+
+              {/* End Date */}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-medium text-[#70757a]">To:</span>
+                <input
+                  id="date-filter-end"
+                  type="date"
+                  value={endDate}
+                  min={startDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  title="Filter to End Date"
+                  className="bg-transparent text-xs text-[#202124] focus:outline-none cursor-pointer max-w-[110px]"
+                />
+              </div>
+
+              {startDate || endDate ? (
                 <button
                   type="button"
-                  onClick={() => setDateFilter("")}
-                  title="Clear date filter (show all dates)"
-                  className="p-0.5 text-[#70757a] hover:text-[#202124] hover:bg-[#e8f0fe] rounded transition-colors"
+                  onClick={() => {
+                    setStartDate("");
+                    setEndDate("");
+                  }}
+                  title="Clear date range (show all dates)"
+                  className="p-0.5 text-[#70757a] hover:text-[#202124] hover:bg-[#e8f0fe] rounded transition-colors ml-0.5"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -898,10 +921,12 @@ export default function EnterpriseEmailDashboard() {
                     const y = today.getFullYear();
                     const m = String(today.getMonth() + 1).padStart(2, "0");
                     const d = String(today.getDate()).padStart(2, "0");
-                    setDateFilter(`${y}-${m}-${d}`);
+                    const todayStr = `${y}-${m}-${d}`;
+                    setStartDate(todayStr);
+                    setEndDate(todayStr);
                   }}
-                  title="Filter by Today's date"
-                  className="text-[10px] text-[#1a73e8] hover:underline font-medium px-1.5 py-0.5 bg-[#e8f0fe] rounded ml-0.5"
+                  title="Filter for Today's date"
+                  className="text-[10px] text-[#1a73e8] hover:underline font-medium px-1.5 py-0.5 bg-[#e8f0fe] rounded ml-0.5 whitespace-nowrap"
                 >
                   Today
                 </button>
@@ -1015,21 +1040,22 @@ export default function EnterpriseEmailDashboard() {
                       <div className="flex flex-col items-center justify-center gap-2">
                         <FileCode className="w-8 h-8 text-[#9aa0a6]" />
                         <p className="text-sm font-medium text-[#202124]">
-                          {dateFilter || searchQuery || statusFilter !== "all" || batchFilter !== "all"
+                          {startDate || endDate || searchQuery || statusFilter !== "all" || batchFilter !== "all"
                             ? "No records match the active filters"
                             : "No records in current view"}
                         </p>
                         <p className="text-xs text-[#5f6368] max-w-md">
-                          {dateFilter && `Selected date: ${dateFilter}. `}
-                          {dateFilter || searchQuery || statusFilter !== "all" || batchFilter !== "all"
-                            ? "Try clearing or selecting a different date/filter to see your emails."
+                          {(startDate || endDate) && `Date range: ${startDate || "Start"} to ${endDate || "End"}. `}
+                          {startDate || endDate || searchQuery || statusFilter !== "all" || batchFilter !== "all"
+                            ? "Try clearing or selecting a different date range or filter to see your emails."
                             : "Upload an XML file or click \"Manual Entry\" above to add recipient data."}
                         </p>
-                        {(dateFilter || searchQuery || statusFilter !== "all" || batchFilter !== "all") && (
+                        {(startDate || endDate || searchQuery || statusFilter !== "all" || batchFilter !== "all") && (
                           <button
                             type="button"
                             onClick={() => {
-                              setDateFilter("");
+                              setStartDate("");
+                              setEndDate("");
                               setSearchQuery("");
                               setStatusFilter("all");
                               setBatchFilter("all");
