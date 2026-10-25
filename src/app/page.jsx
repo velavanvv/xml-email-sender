@@ -83,6 +83,22 @@ export default function EnterpriseEmailDashboard() {
   // Filtering & Search
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [batchFilter, setBatchFilter] = useState("all");
+
+  // Interpolation helper for preview and template placeholders
+  const interpolate = (template, item) => {
+    if (!template || !item) return "";
+    let res = template;
+    res = res.replace(/\{email\}/gi, item.recipient_email || "");
+    res = res.replace(/\{attachment\}/gi, item.attachment_path ? item.attachment_path.split("/").pop() : "");
+    if (item.extra_fields) {
+      for (const [key, val] of Object.entries(item.extra_fields)) {
+        const regex = new RegExp(`\\{${key}\\}`, "gi");
+        res = res.replace(regex, String(val));
+      }
+    }
+    return res;
+  };
 
   // Common template options
   const [useCommonBody, setUseCommonBody] = useState(false);
@@ -171,6 +187,15 @@ export default function EnterpriseEmailDashboard() {
     return { total, sent, failed, pending };
   }, [records]);
 
+  // Unique XML batches for daily separation
+  const uniqueBatches = useMemo(() => {
+    const set = new Set();
+    records.forEach((r) => {
+      if (r.batch_name) set.add(r.batch_name);
+    });
+    return Array.from(set);
+  }, [records]);
+
   // Filtered records
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
@@ -181,9 +206,10 @@ export default function EnterpriseEmailDashboard() {
         (r.attachment_path && r.attachment_path.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesStatus = statusFilter === "all" ? true : r.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesBatch = batchFilter === "all" ? true : r.batch_name === batchFilter;
+      return matchesSearch && matchesStatus && matchesBatch;
     });
-  }, [records, searchQuery, statusFilter]);
+  }, [records, searchQuery, statusFilter, batchFilter]);
 
   // XML File Upload
   const handleXmlUpload = async (file) => {
@@ -205,7 +231,13 @@ export default function EnterpriseEmailDashboard() {
         return;
       }
 
-      setRecords((prev) => [...json.records, ...prev]);
+      const batchName = file.name || `Upload_${new Date().toLocaleDateString()}`;
+      const taggedRecords = json.records.map((r) => ({
+        ...r,
+        batch_name: batchName,
+      }));
+
+      setRecords((prev) => [...taggedRecords, ...prev]);
     } catch (err) {
       alert("Error parsing XML: " + err.message);
     } finally {
@@ -706,6 +738,21 @@ export default function EnterpriseEmailDashboard() {
               <span>Export CSV</span>
             </button>
 
+            {stats.sent > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm(`Remove ${stats.sent} delivered records from the active table? (Pending records will remain)`)) {
+                    setRecords((prev) => prev.filter((r) => r.status !== "sent"));
+                    setSelectedIds(new Set());
+                  }
+                }}
+                className="px-2.5 py-2 text-xs font-medium text-[#1e8e3e] hover:bg-[#e6f4ea] rounded-md border border-[#ceead6] transition-colors"
+                title="Clear already sent emails to start clean for next batch"
+              >
+                Clear Sent ({stats.sent})
+              </button>
+            )}
+
             {records.length > 0 && (
               <button
                 onClick={() => {
@@ -745,11 +792,27 @@ export default function EnterpriseEmailDashboard() {
                 placeholder="Search email, subject, file..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-white border border-[#dadce0] rounded-md pl-8 pr-3 py-1.5 text-xs text-[#202124] placeholder-[#80868b] focus:outline-none focus:border-[#1a73e8] w-48 sm:w-60"
+                className="bg-white border border-[#dadce0] rounded-md pl-8 pr-3 py-1.5 text-xs text-[#202124] placeholder-[#80868b] focus:outline-none focus:border-[#1a73e8] w-44 sm:w-56"
               />
             </div>
 
-            {/* Filter */}
+            {/* Batch Filter (if more than 1 batch) */}
+            {uniqueBatches.length > 1 && (
+              <select
+                value={batchFilter}
+                onChange={(e) => setBatchFilter(e.target.value)}
+                className="bg-white border border-[#dadce0] rounded-md px-2.5 py-1.5 text-xs text-[#3c4043] focus:outline-none focus:border-[#1a73e8] max-w-[160px] truncate"
+              >
+                <option value="all">All Files ({uniqueBatches.length})</option>
+                {uniqueBatches.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Status Filter */}
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -888,7 +951,7 @@ export default function EnterpriseEmailDashboard() {
                         <td className="max-w-xs truncate text-[#3c4043]">
                           {useCommonBody ? (
                             <span className="text-[#1a73e8] font-medium text-xs">
-                              [Template] {commonSubject || "(Empty subject)"}
+                              {interpolate(commonSubject, r) || "(Empty subject)"}
                             </span>
                           ) : (
                             r.subject || <span className="text-[#80868b] italic">No subject</span>
@@ -898,7 +961,9 @@ export default function EnterpriseEmailDashboard() {
                         {/* Message Preview */}
                         <td className="max-w-xs truncate text-[#5f6368] text-xs">
                           {useCommonBody ? (
-                            <span className="text-[#1a73e8]">Unified Common Template</span>
+                            <span className="text-[#3c4043]">
+                              {interpolate(commonBody, r)}
+                            </span>
                           ) : (
                             r.message || <span className="text-[#80868b] italic">Empty message</span>
                           )}
@@ -1381,7 +1446,7 @@ export default function EnterpriseEmailDashboard() {
                 <div>
                   <strong className="text-[#5f6368]">Subject:</strong>{" "}
                   <span className="text-[#202124] font-medium">
-                    {useCommonBody ? commonSubject : previewRecord.subject || "(No subject)"}
+                    {useCommonBody ? interpolate(commonSubject, previewRecord) : previewRecord.subject || "(No subject)"}
                   </span>
                 </div>
                 {previewRecord.attachment_path && (
@@ -1393,9 +1458,9 @@ export default function EnterpriseEmailDashboard() {
               </div>
 
               <div>
-                <label className="block text-[#5f6368] font-semibold mb-1">Rendered Body Content:</label>
+                <label className="block text-[#5f6368] font-semibold mb-1">Rendered Personalized Body Content:</label>
                 <div className="p-4 rounded border border-[#dadce0] bg-white text-[#202124] whitespace-pre-wrap leading-relaxed font-sans min-h-[120px]">
-                  {useCommonBody ? commonBody : previewRecord.message || "(Empty message content)"}
+                  {useCommonBody ? interpolate(commonBody, previewRecord) : previewRecord.message || "(Empty message content)"}
                 </div>
               </div>
             </div>
