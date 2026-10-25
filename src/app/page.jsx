@@ -246,39 +246,71 @@ export default function EnterpriseEmailDashboard() {
     });
   }, [records, searchQuery, statusFilter, batchFilter, startDate, endDate]);
 
-  // XML File Upload
-  const handleXmlUpload = async (file) => {
-    if (!file) return;
+  // Multi-file upload for XML, CSV, and JSON
+  const handleFilesUpload = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
     setIsUploading(true);
 
-    try {
-      const data = new FormData();
-      data.append("file", file);
+    const files = Array.from(fileList);
+    let totalAdded = 0;
+    const errors = [];
+    const newRecords = [];
 
-      const res = await fetch("/api/parse-xml", {
-        method: "POST",
-        body: data,
-      });
+    for (const file of files) {
+      try {
+        const data = new FormData();
+        data.append("file", file);
 
-      const json = await res.json();
-      if (!res.ok) {
-        alert(json.error || "Failed to parse XML file.");
-        return;
+        const res = await fetch("/api/parse-xml", {
+          method: "POST",
+          body: data,
+        });
+
+        const json = await res.json();
+        if (!res.ok) {
+          errors.push(`${file.name}: ${json.error || "Failed to parse file."}`);
+          continue;
+        }
+
+        const batchName = file.name || `Batch_${new Date().toLocaleDateString()}`;
+        const taggedRecords = (json.records || []).map((r) => ({
+          ...r,
+          batch_name: batchName,
+        }));
+
+        newRecords.push(...taggedRecords);
+        totalAdded += taggedRecords.length;
+      } catch (err) {
+        errors.push(`${file.name}: ${err.message}`);
       }
-
-      const batchName = file.name || `Upload_${new Date().toLocaleDateString()}`;
-      const taggedRecords = json.records.map((r) => ({
-        ...r,
-        batch_name: batchName,
-      }));
-
-      setRecords((prev) => [...taggedRecords, ...prev]);
-    } catch (err) {
-      alert("Error parsing XML: " + err.message);
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+
+    if (newRecords.length > 0) {
+      setRecords((prev) => [...newRecords, ...prev]);
+    }
+
+    if (errors.length > 0) {
+      alert(`Uploaded ${files.length} file(s) with ${totalAdded} record(s) loaded.\n\nErrors encountered:\n` + errors.join("\n"));
+    }
+
+    setIsUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // Download Sample CSV
+  const downloadSampleCsv = () => {
+    const sample = `email,name,subject,message,attachment,account_no,balance
+alex.turner@example.com,Alex Turner,Monthly Statement - October 2026,"Hi Alex, please find your monthly summary statement attached. Contact our accounts team if you have any questions.",/invoices/2026/alex_october_invoice.pdf,ACC-8921,$450.00
+sarah.jenkins@acmecorp.io,Sarah Jenkins,Contract Agreement & Verification,"Dear Sarah, attached is the revised NDA and enterprise service contract for your review and execution.",https://example.com/docs/signed_contract.pdf,ACC-4412,$1200.00
+billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly process invoice #542 due on October 30.",/receipts/globex_542.pdf,ACC-1004,$3850.50`;
+
+    const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sample_recipients.csv";
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Download Sample XML
@@ -287,26 +319,26 @@ export default function EnterpriseEmailDashboard() {
 <email_batch>
   <record>
     <email>alex.turner@example.com</email>
+    <name>Alex Turner</name>
     <subject>Monthly Statement - October 2026</subject>
     <message>Hi Alex, please find your monthly summary statement attached.</message>
     <attachment_path>/invoices/2026/alex_october_invoice.pdf</attachment_path>
-    <name>Alex Turner</name>
     <account_no>ACC-8921</account_no>
   </record>
   <record>
     <email>sarah.jenkins@acmecorp.io</email>
+    <name>Sarah Jenkins</name>
     <subject>Contract Agreement &amp; Verification</subject>
     <message>Dear Sarah, attached is the revised NDA and enterprise service contract.</message>
     <attachment_path>https://example.com/docs/signed_contract.pdf</attachment_path>
-    <name>Sarah Jenkins</name>
     <company>Acme Corp</company>
   </record>
   <record>
     <email>billing@globex.org</email>
+    <name>Globex Accounts</name>
     <subject>Payment Reminder #542</subject>
     <message>Hello team, kindly process invoice #542 due on October 30.</message>
     <attachment_path>/receipts/globex_542.pdf</attachment_path>
-    <name>Globex Accounts</name>
     <po_number>PO-7741</po_number>
   </record>
 </email_batch>`;
@@ -565,14 +597,26 @@ export default function EnterpriseEmailDashboard() {
               <Settings className="w-3.5 h-3.5 text-[#5f6368] ml-1" />
             </button>
 
-            {/* Download Sample XML */}
-            <button
-              onClick={downloadSampleXml}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#1a73e8] transition-colors"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sample XML</span>
-            </button>
+            {/* Download Sample Templates (CSV & XML) */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={downloadSampleCsv}
+                title="Download Sample CSV Template"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#1a73e8] transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Sample CSV</span>
+              </button>
+
+              <button
+                onClick={downloadSampleXml}
+                title="Download Sample XML Template"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#5f6368] transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Sample XML</span>
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -585,7 +629,7 @@ export default function EnterpriseEmailDashboard() {
           <div className="flex items-center gap-2 sm:gap-6 flex-wrap">
             <div className="flex items-center gap-2 text-[#1a73e8] font-medium">
               <span className="w-5 h-5 rounded-full bg-[#1a73e8] text-white flex items-center justify-center text-[11px] font-bold">1</span>
-              <span>Upload XML / Add Records</span>
+              <span>Upload CSV / XML / Add Records</span>
             </div>
             <span className="text-[#dadce0] hidden sm:inline">&rarr;</span>
             <div className="flex items-center gap-2 font-medium text-[#202124]">
@@ -739,22 +783,28 @@ export default function EnterpriseEmailDashboard() {
             STEP 1 & 3: TOOLBAR & RECIPIENT ACTIONS
         ──────────────────────────────────────────────────────────────────────── */}
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-          {/* Left Actions: Upload XML & Manual Entry */}
+          {/* Left Actions: Upload CSV / XML & Manual Entry */}
           <div className="flex flex-wrap items-center gap-2">
             <input
               type="file"
               ref={fileInputRef}
-              accept=".xml"
-              onChange={(e) => handleXmlUpload(e.target.files?.[0])}
+              accept=".xml,.csv,.json,text/csv,application/json,text/xml,application/xml"
+              multiple
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleFilesUpload(e.target.files);
+                }
+              }}
               className="hidden"
             />
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading}
-              className="btn-google-primary"
+              className="btn-google-primary inline-flex items-center gap-2"
+              title="Upload one or multiple CSV, XML, or JSON files"
             >
               <UploadCloud className="w-4 h-4" />
-              <span>{isUploading ? "Processing XML..." : "Upload XML File"}</span>
+              <span>{isUploading ? "Processing File(s)..." : "Upload CSV / XML"}</span>
             </button>
 
             <button
@@ -1027,7 +1077,7 @@ export default function EnterpriseEmailDashboard() {
                   <th>Subject</th>
                   <th>Message Preview</th>
                   <th>Attachment</th>
-                  <th>Custom XML Fields</th>
+                  <th>Custom Fields (CSV / XML)</th>
                   <th>Sent Date</th>
                   <th>Delivery Status</th>
                   <th className="text-right">Actions</th>
@@ -1048,7 +1098,7 @@ export default function EnterpriseEmailDashboard() {
                           {(startDate || endDate) && `Date range: ${startDate || "Start"} to ${endDate || "End"}. `}
                           {startDate || endDate || searchQuery || statusFilter !== "all" || batchFilter !== "all"
                             ? "Try clearing or selecting a different date range or filter to see your emails."
-                            : "Upload an XML file or click \"Manual Entry\" above to add recipient data."}
+                            : "Upload a CSV or XML file, or click \"Manual Entry\" above to add recipient data."}
                         </p>
                         {(startDate || endDate || searchQuery || statusFilter !== "all" || batchFilter !== "all") && (
                           <button
