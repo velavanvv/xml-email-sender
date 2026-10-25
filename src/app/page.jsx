@@ -31,6 +31,7 @@ import {
   FileCode,
   Layers,
   Sparkles,
+  Calendar,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
@@ -84,6 +85,7 @@ export default function EnterpriseEmailDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [batchFilter, setBatchFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
 
   // Interpolation helper for preview and template placeholders
   const interpolate = (template, item) => {
@@ -187,6 +189,25 @@ export default function EnterpriseEmailDashboard() {
     return { total, sent, failed, pending };
   }, [records]);
 
+  // Unique dates for date-wise tracking
+  const uniqueDates = useMemo(() => {
+    const dates = new Set();
+    records.forEach((r) => {
+      const d = r.sent_at || r.created_at;
+      if (d) {
+        try {
+          const dateStr = new Date(d).toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          });
+          dates.add(dateStr);
+        } catch (e) {}
+      }
+    });
+    return Array.from(dates);
+  }, [records]);
+
   // Unique XML batches for daily separation
   const uniqueBatches = useMemo(() => {
     const set = new Set();
@@ -207,9 +228,24 @@ export default function EnterpriseEmailDashboard() {
 
       const matchesStatus = statusFilter === "all" ? true : r.status === statusFilter;
       const matchesBatch = batchFilter === "all" ? true : r.batch_name === batchFilter;
-      return matchesSearch && matchesStatus && matchesBatch;
+
+      const matchesDate =
+        dateFilter === "all"
+          ? true
+          : (() => {
+              const d = r.sent_at || r.created_at;
+              if (!d) return false;
+              const dateStr = new Date(d).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              });
+              return dateStr === dateFilter;
+            })();
+
+      return matchesSearch && matchesStatus && matchesBatch && matchesDate;
     });
-  }, [records, searchQuery, statusFilter, batchFilter]);
+  }, [records, searchQuery, statusFilter, batchFilter, dateFilter]);
 
   // XML File Upload
   const handleXmlUpload = async (file) => {
@@ -287,16 +323,27 @@ export default function EnterpriseEmailDashboard() {
 
   // Export CSV
   const exportCsv = () => {
-    const headers = ["ID", "Recipient Email", "Subject", "Status", "Attachment", "Status Details", "Timestamp"];
-    const rows = records.map((r) => [
-      r.id,
-      `"${r.recipient_email}"`,
-      `"${(r.subject || "").replace(/"/g, '""')}"`,
-      r.status,
-      `"${(r.attachment_path || "").replace(/"/g, '""')}"`,
-      `"${(r.status_message || "").replace(/"/g, '""')}"`,
-      r.created_at,
-    ]);
+    const headers = ["ID", "Recipient Email", "Subject", "Status", "Sent Date", "Sent Time", "Attachment", "Status Details", "Batch Source"];
+    const rows = records.map((r) => {
+      const sentDate = r.sent_at
+        ? new Date(r.sent_at).toLocaleDateString()
+        : r.created_at
+        ? new Date(r.created_at).toLocaleDateString()
+        : "";
+      const sentTime = r.sent_at ? new Date(r.sent_at).toLocaleTimeString() : "";
+
+      return [
+        r.id,
+        `"${r.recipient_email}"`,
+        `"${(useCommonBody ? interpolate(commonSubject, r) : (r.subject || "")).replace(/"/g, '""')}"`,
+        r.status,
+        `"${sentDate}"`,
+        `"${sentTime}"`,
+        `"${(r.attachment_path || "").replace(/"/g, '""')}"`,
+        `"${(r.status_message || "").replace(/"/g, '""')}"`,
+        `"${(r.batch_name || "").replace(/"/g, '""')}"`,
+      ];
+    });
 
     const csvContent = [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -812,6 +859,22 @@ export default function EnterpriseEmailDashboard() {
               </select>
             )}
 
+            {/* Date Filter */}
+            {uniqueDates.length > 0 && (
+              <select
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="bg-white border border-[#dadce0] rounded-md px-2.5 py-1.5 text-xs text-[#3c4043] focus:outline-none focus:border-[#1a73e8] max-w-[150px] truncate"
+              >
+                <option value="all">📅 All Dates ({uniqueDates.length})</option>
+                {uniqueDates.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {/* Status Filter */}
             <select
               value={statusFilter}
@@ -907,6 +970,7 @@ export default function EnterpriseEmailDashboard() {
                   <th>Message Preview</th>
                   <th>Attachment</th>
                   <th>Custom XML Fields</th>
+                  <th>Sent Date</th>
                   <th>Delivery Status</th>
                   <th className="text-right">Actions</th>
                 </tr>
@@ -914,7 +978,7 @@ export default function EnterpriseEmailDashboard() {
               <tbody>
                 {filteredRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-[#5f6368]">
+                    <td colSpan={9} className="py-12 text-center text-[#5f6368]">
                       <div className="flex flex-col items-center justify-center gap-2">
                         <FileCode className="w-8 h-8 text-[#9aa0a6]" />
                         <p className="text-sm font-medium text-[#202124]">No records in current view</p>
@@ -999,6 +1063,29 @@ export default function EnterpriseEmailDashboard() {
                             </div>
                           ) : (
                             <span className="text-[#80868b] text-xs">—</span>
+                          )}
+                        </td>
+
+                        {/* Sent Date / Created Date */}
+                        <td className="whitespace-nowrap">
+                          {r.status === "sent" && r.sent_at ? (
+                            <div>
+                              <div className="font-medium text-[#202124] flex items-center gap-1.5 text-xs">
+                                <Calendar className="w-3.5 h-3.5 text-[#1e8e3e]" />
+                                <span>{new Date(r.sent_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>
+                              </div>
+                              <div className="text-[11px] text-[#5f6368] pl-5 font-mono">
+                                {new Date(r.sent_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="text-[#5f6368] flex items-center gap-1.5 text-xs">
+                                <Clock className="w-3.5 h-3.5 text-[#80868b]" />
+                                <span>{r.created_at ? new Date(r.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Today"}</span>
+                              </div>
+                              <div className="text-[10px] text-[#80868b] pl-5">Queue created</div>
+                            </div>
                           )}
                         </td>
 
