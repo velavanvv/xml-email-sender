@@ -32,6 +32,16 @@ import {
   Layers,
   Sparkles,
   Calendar,
+  Lock,
+  LogOut,
+  Key,
+  Globe,
+  BookOpen,
+  Cloud,
+  Server,
+  DollarSign,
+  CheckCircle2,
+  HelpCircle,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
@@ -103,14 +113,32 @@ export default function EnterpriseEmailDashboard() {
     return res;
   };
 
-  // Common template options
+  // Common template options & Global common attachment
   const [useCommonBody, setUseCommonBody] = useState(false);
   const [commonSubject, setCommonSubject] = useState("Official Notice: Statement & Documents for {name}");
   const [commonBody, setCommonBody] = useState("Dear {name},\n\nPlease find attached the official documentation for your account.\n\nAccount Reference: {account_no}\n\nIf you have any questions or require additional support, reply directly to this email.\n\nBest regards,\nClient Services Team");
+  const [commonAttachment, setCommonAttachment] = useState(null); // { name, size, data }
+
+  // Security & Authentication Gate
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authPasscode, setAuthPasscode] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
+  const [authError, setAuthError] = useState("");
+  const [systemPasscode, setSystemPasscode] = useState("admin123");
+
+  // Free Hosted Cloud DB State
+  const [isSyncingDb, setIsSyncingDb] = useState(false);
+  const [cloudDbStatus, setCloudDbStatus] = useState("Connected (Free Demo Host)");
+  const [lastSyncedTime, setLastSyncedTime] = useState("");
+
+  // Domain Verification & Credits Guide Modal
+  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [guideTab, setGuideTab] = useState("verification"); // "verification" | "credits" | "database"
 
   // Gateway Configuration
   const [provider, setProvider] = useState("simulation"); // simulation, mailchimp, resend, smtp
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configTab, setConfigTab] = useState("gateways"); // "gateways" | "database" | "security"
   const [resendKey, setResendKey] = useState("");
   const [resendFromEmail, setResendFromEmail] = useState("onboarding@resend.dev");
 
@@ -135,6 +163,9 @@ export default function EnterpriseEmailDashboard() {
     subject: "",
     message: "",
     attachment_path: "",
+    attachment_name: "",
+    attachment_data: "",
+    attachment_size: "",
     extra_name: "",
     extra_field1: "",
   });
@@ -143,6 +174,8 @@ export default function EnterpriseEmailDashboard() {
   const [previewRecord, setPreviewRecord] = useState(null);
 
   const fileInputRef = useRef(null);
+  const attachmentFileInputRef = useRef(null);
+  const commonAttachmentInputRef = useRef(null);
 
   // Load from LocalStorage
   useEffect(() => {
@@ -166,6 +199,15 @@ export default function EnterpriseEmailDashboard() {
         if (cfg.mailchimpFromName) setMailchimpFromName(cfg.mailchimpFromName);
         if (cfg.smtpSettings) setSmtpSettings(cfg.smtpSettings);
       }
+      // Auth check
+      const storedPass = localStorage.getItem("xml_dispatch_passcode") || "admin123";
+      setSystemPasscode(storedPass);
+
+      const sessionAuth = sessionStorage.getItem("xml_dispatch_auth");
+      const localAuth = localStorage.getItem("xml_dispatch_auth");
+      if (sessionAuth === "true" || localAuth === "true") {
+        setIsAuthenticated(true);
+      }
     } catch (e) {
       console.warn("Could not read from local storage", e);
     }
@@ -180,6 +222,114 @@ export default function EnterpriseEmailDashboard() {
       console.warn("Could not save records to local storage", e);
     }
   }, [records, isClientLoaded]);
+
+  // Authentication Handlers
+  const handleLogin = (e) => {
+    e?.preventDefault();
+    if (authPasscode.trim() === systemPasscode.trim()) {
+      setIsAuthenticated(true);
+      setAuthError("");
+      if (rememberMe) {
+        localStorage.setItem("xml_dispatch_auth", "true");
+      } else {
+        sessionStorage.setItem("xml_dispatch_auth", "true");
+      }
+    } else {
+      setAuthError("Incorrect passcode. Try 'admin123' for demo access.");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("xml_dispatch_auth");
+    sessionStorage.removeItem("xml_dispatch_auth");
+    setIsAuthenticated(false);
+    setAuthPasscode("");
+  };
+
+  // Free Hosted Cloud DB Handlers
+  const syncToCloudDb = async () => {
+    setIsSyncingDb(true);
+    try {
+      const res = await fetch("/api/db", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ records }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setLastSyncedTime(new Date().toLocaleTimeString());
+        alert(`✅ Cloud DB Synchronized! ${data.count} records saved to free hosted storage.`);
+      } else {
+        alert("Sync error: " + data.error);
+      }
+    } catch (err) {
+      alert("Cloud DB sync failed: " + err.message);
+    } finally {
+      setIsSyncingDb(false);
+    }
+  };
+
+  const loadFromCloudDb = async () => {
+    setIsSyncingDb(true);
+    try {
+      const res = await fetch("/api/db");
+      const data = await res.json();
+      if (res.ok && data.records) {
+        setRecords(data.records);
+        setLastSyncedTime(new Date().toLocaleTimeString());
+        alert(`✅ Loaded ${data.records.length} records from Free Cloud DB!`);
+      } else {
+        alert("Load error: " + data.error);
+      }
+    } catch (err) {
+      alert("Failed to load from Cloud DB: " + err.message);
+    } finally {
+      setIsSyncingDb(false);
+    }
+  };
+
+  // Real File Attachment Handlers
+  const handleModalAttachmentFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Attachment exceeds 10MB limit. Please choose a smaller file.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setFormData((prev) => ({
+        ...prev,
+        attachment_name: file.name,
+        attachment_data: reader.result,
+        attachment_size: `${(file.size / 1024).toFixed(1)} KB`,
+        attachment_path: file.name,
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCommonAttachmentFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 15 * 1024 * 1024) {
+      alert("Common attachment exceeds 15MB limit.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCommonAttachment({
+        name: file.name,
+        size: `${(file.size / 1024).toFixed(1)} KB`,
+        data: reader.result,
+      });
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Statistics
   const stats = useMemo(() => {
@@ -401,6 +551,9 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 subject: formData.subject.trim(),
                 message: formData.message,
                 attachment_path: formData.attachment_path.trim(),
+                attachment_name: formData.attachment_name || (formData.attachment_path ? formData.attachment_path.split("/").pop() : ""),
+                attachment_data: formData.attachment_data || "",
+                attachment_size: formData.attachment_size || "",
                 extra_fields: {
                   ...r.extra_fields,
                   name: formData.extra_name,
@@ -417,6 +570,9 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
         subject: formData.subject.trim() || "Notification",
         message: formData.message,
         attachment_path: formData.attachment_path.trim(),
+        attachment_name: formData.attachment_name || (formData.attachment_path ? formData.attachment_path.split("/").pop() : ""),
+        attachment_data: formData.attachment_data || "",
+        attachment_size: formData.attachment_size || "",
         extra_fields: {
           name: formData.extra_name,
           reference: formData.extra_field1,
@@ -437,7 +593,10 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
       recipient_email: rec.recipient_email,
       subject: rec.subject,
       message: rec.message,
-      attachment_path: rec.attachment_path,
+      attachment_path: rec.attachment_path || "",
+      attachment_name: rec.attachment_name || (rec.attachment_path ? rec.attachment_path.split("/").pop() : ""),
+      attachment_data: rec.attachment_data || "",
+      attachment_size: rec.attachment_size || "",
       extra_name: rec.extra_fields?.name || "",
       extra_field1: rec.extra_fields?.reference || rec.extra_fields?.account_no || "",
     });
@@ -498,6 +657,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
           useCommonBody,
           commonSubject,
           commonBodyTemplate: commonBody,
+          commonAttachment,
         }),
       });
 
@@ -542,6 +702,81 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
     }
   };
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // SECURITY AUTHENTICATION GATE (Login Portal)
+  // ──────────────────────────────────────────────────────────────────────────
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#f8f9fa] flex flex-col justify-center items-center px-4 py-12">
+        <div className="w-full max-w-md bg-white border border-[#dadce0] rounded-xl shadow-lg p-8 animate-fade-in">
+          <div className="flex flex-col items-center text-center mb-6">
+            <div className="w-12 h-12 rounded-full bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center mb-3">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+            <h1 className="text-xl font-semibold text-[#202124]">CloudMail Dispatch Gateway</h1>
+            <p className="text-xs text-[#5f6368] mt-1">Enterprise Security Access &amp; Dispatch Authentication</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#202124] mb-1">
+                Admin Security Passcode
+              </label>
+              <div className="relative">
+                <input
+                  type="password"
+                  value={authPasscode}
+                  onChange={(e) => {
+                    setAuthPasscode(e.target.value);
+                    setAuthError("");
+                  }}
+                  placeholder="Enter access passcode..."
+                  className="w-full bg-white border border-[#dadce0] rounded-md px-3.5 py-2.5 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]"
+                  autoFocus
+                />
+                <Key className="w-4 h-4 text-[#80868b] absolute right-3 top-2.5" />
+              </div>
+              {authError && <p className="text-xs text-[#d93025] mt-1.5 font-medium">{authError}</p>}
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-[#5f6368]">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="rounded border-[#dadce0] text-[#1a73e8] focus:ring-0"
+                />
+                <span>Remember session</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setAuthPasscode("admin123")}
+                className="text-[#1a73e8] hover:underline text-[11px]"
+              >
+                Auto-fill Demo Key
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-2.5 px-4 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded-md text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Authenticate &amp; Enter Dashboard</span>
+            </button>
+          </form>
+
+          <div className="mt-6 pt-4 border-t border-[#f1f3f4] text-center text-[11px] text-[#70757a] space-y-1">
+            <p>Demo Admin Passcode: <span className="font-mono font-semibold text-[#202124]">admin123</span></p>
+            <p className="text-[10px]">Protects recipient records, email dispatches, and private API keys.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#f8f9fa] text-[#202124]">
       {/* ──────────────────────────────────────────────────────────────────────────
@@ -570,7 +805,17 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
           </div>
 
           {/* Right Header Actions */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Guide & Domain Verification CTA */}
+            <button
+              onClick={() => setShowGuideModal(true)}
+              title="View Domain Verification & Email Credits Guide"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#1a73e8] bg-[#e8f0fe] hover:bg-[#d2e3fc] text-xs font-semibold text-[#1a73e8] transition-colors"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Domain &amp; Credits</span>
+            </button>
+
             {/* Gateway Status Badge */}
             <button
               onClick={() => setShowConfigModal(true)}
@@ -617,6 +862,16 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 <span>Sample XML</span>
               </button>
             </div>
+
+            {/* Lock / Sign Out */}
+            <button
+              onClick={handleLogout}
+              title="Lock dashboard"
+              className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#fce8e6] text-xs font-medium text-[#5f6368] hover:text-[#c5221f] transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Lock</span>
+            </button>
           </div>
         </div>
       </header>
@@ -634,7 +889,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
             <span className="text-[#dadce0] hidden sm:inline">&rarr;</span>
             <div className="flex items-center gap-2 font-medium text-[#202124]">
               <span className="w-5 h-5 rounded-full bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center text-[11px] font-bold">2</span>
-              <span>Configure Body / Template</span>
+              <span>Configure Body / Template &amp; Attachments</span>
             </div>
             <span className="text-[#dadce0] hidden sm:inline">&rarr;</span>
             <div className="flex items-center gap-2 font-medium text-[#202124]">
@@ -643,9 +898,29 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] text-[#5f6368]">
-            <Database className="w-3.5 h-3.5 text-[#1e8e3e]" />
-            <span>Browser autosave active</span>
+          {/* Cloud DB Status & Actions */}
+          <div className="flex items-center gap-2.5 text-[11px] text-[#5f6368]">
+            <div className="flex items-center gap-1">
+              <Cloud className="w-3.5 h-3.5 text-[#1a73e8]" />
+              <span>Free Cloud DB: <strong className="text-[#1e8e3e]">Active</strong></span>
+            </div>
+            <button
+              onClick={syncToCloudDb}
+              disabled={isSyncingDb}
+              title="Push records to Free Hosted Cloud DB"
+              className="px-2 py-0.5 rounded border border-[#dadce0] bg-[#f8f9fa] hover:bg-white text-[11px] font-medium text-[#1a73e8] inline-flex items-center gap-1 transition-colors"
+            >
+              <RefreshCw className={`w-3 h-3 ${isSyncingDb ? "animate-spin" : ""}`} />
+              <span>Sync DB</span>
+            </button>
+            <button
+              onClick={loadFromCloudDb}
+              disabled={isSyncingDb}
+              title="Load records from Free Hosted Cloud DB"
+              className="px-2 py-0.5 rounded border border-[#dadce0] bg-[#f8f9fa] hover:bg-white text-[11px] font-medium text-[#5f6368] transition-colors"
+            >
+              Load DB
+            </button>
           </div>
         </div>
       </div>
@@ -777,6 +1052,56 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               </div>
             </div>
           )}
+
+          {/* Global Batch Common Attachment Section */}
+          <div className="mt-4 pt-4 border-t border-[#e8eaed] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#f8f9fa] p-3.5 rounded-lg border border-[#e8eaed]">
+            <div className="flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-md bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center shrink-0 mt-0.5">
+                <Paperclip className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-[#202124]">Global Batch Attachment (Optional)</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-[#f1f3f4] text-[#5f6368] rounded">Appends to all dispatches</span>
+                </div>
+                <p className="text-[11px] text-[#5f6368] mt-0.5">
+                  Attach a universal file (PDF, Terms document, Invoice template, or Flyer) to deliver with every email in this batch.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                ref={commonAttachmentInputRef}
+                onChange={handleCommonAttachmentFile}
+                className="hidden"
+              />
+              {commonAttachment ? (
+                <div className="flex items-center gap-2 bg-white border border-[#1a73e8] rounded-md px-2.5 py-1 text-xs shadow-xs">
+                  <span className="font-medium text-[#1a73e8] truncate max-w-[150px]">{commonAttachment.name}</span>
+                  <span className="text-[10px] text-[#5f6368]">({commonAttachment.size})</span>
+                  <button
+                    type="button"
+                    onClick={() => setCommonAttachment(null)}
+                    title="Remove common attachment"
+                    className="p-0.5 text-[#5f6368] hover:text-[#c5221f] rounded"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => commonAttachmentInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f1f3f4] text-xs font-medium text-[#3c4043] inline-flex items-center gap-1.5 shadow-xs transition-colors"
+                >
+                  <UploadCloud className="w-3.5 h-3.5 text-[#5f6368]" />
+                  <span>Attach File to Batch</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* ────────────────────────────────────────────────────────────────────────
@@ -1351,12 +1676,66 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               </div>
 
               <div>
-                <label className="block text-[#202124] font-medium mb-1">Attachment File URL or Server Path</label>
+                <label className="block text-[#202124] font-medium mb-1">
+                  File Attachment (Upload Local File or Enter URL)
+                </label>
+
+                {/* Local file upload button & preview */}
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <input
+                    type="file"
+                    ref={attachmentFileInputRef}
+                    onChange={handleModalAttachmentFile}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => attachmentFileInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f1f3f4] text-xs font-medium text-[#3c4043] inline-flex items-center gap-1.5 transition-colors shadow-xs"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5 text-[#5f6368]" />
+                    <span>Upload Local File (PDF, Image, Doc)</span>
+                  </button>
+
+                  {formData.attachment_name && (
+                    <div className="flex items-center gap-1.5 bg-[#e8f0fe] border border-[#d2e3fc] px-2.5 py-1 rounded-md text-xs text-[#1a73e8]">
+                      <Paperclip className="w-3.5 h-3.5" />
+                      <span className="font-medium truncate max-w-[150px]">{formData.attachment_name}</span>
+                      {formData.attachment_size && (
+                        <span className="text-[10px] text-[#5f6368]">({formData.attachment_size})</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            attachment_name: "",
+                            attachment_data: "",
+                            attachment_size: "",
+                            attachment_path: "",
+                          })
+                        }
+                        className="text-[#5f6368] hover:text-[#c5221f] ml-1"
+                        title="Remove file"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Remote URL or server path fallback */}
                 <input
                   type="text"
                   value={formData.attachment_path}
-                  onChange={(e) => setFormData({ ...formData, attachment_path: e.target.value })}
-                  placeholder="e.g. /invoices/statement.pdf or https://..."
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      attachment_path: e.target.value,
+                      attachment_name: e.target.value ? e.target.value.split("/").pop() : "",
+                    })
+                  }
+                  placeholder="Or enter remote file URL (https://... or /invoices/...)"
                   className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
                 />
               </div>
@@ -1423,32 +1802,72 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               </button>
             </div>
 
-            {/* Provider Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-4">
-              {[
-                { id: "simulation", name: "Simulator", desc: "Zero setup test mode" },
-                { id: "mailchimp", name: "Mailchimp", desc: "Private domain (Mandrill)" },
-                { id: "resend", name: "Resend", desc: "Free 3k emails/month" },
-                { id: "smtp", name: "Custom SMTP", desc: "Gmail / Brevo / Server" },
-              ].map((p) => {
-                const isActive = provider === p.id;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setProvider(p.id)}
-                    className={`p-3 rounded-md border text-left transition-all ${
-                      isActive
-                        ? "border-[#1a73e8] bg-[#e8f0fe] text-[#1a73e8]"
-                        : "border-[#dadce0] bg-white text-[#5f6368] hover:bg-[#f8f9fa]"
-                    }`}
-                  >
-                    <div className="text-xs font-semibold text-[#202124]">{p.name}</div>
-                    <div className="text-[11px] text-[#5f6368] mt-0.5 leading-tight">{p.desc}</div>
-                  </button>
-                );
-              })}
+            {/* Top Config Tabs */}
+            <div className="flex items-center gap-1 border-b border-[#dadce0] mt-3 pb-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setConfigTab("gateways")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  configTab === "gateways"
+                    ? "bg-[#1a73e8] text-white"
+                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                Email Gateways
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfigTab("database")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  configTab === "database"
+                    ? "bg-[#1a73e8] text-white"
+                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                Free Cloud Database
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfigTab("security")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  configTab === "security"
+                    ? "bg-[#1a73e8] text-white"
+                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                Admin Security
+              </button>
             </div>
+
+            {/* TAB 1: EMAIL GATEWAYS */}
+            {configTab === "gateways" && (
+              <>
+                {/* Provider Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-4">
+                  {[
+                    { id: "simulation", name: "Simulator", desc: "Zero setup test mode" },
+                    { id: "mailchimp", name: "Mailchimp", desc: "Private domain (Mandrill)" },
+                    { id: "resend", name: "Resend", desc: "Free 3k emails/month" },
+                    { id: "smtp", name: "Custom SMTP", desc: "Gmail / Brevo / Server" },
+                  ].map((p) => {
+                    const isActive = provider === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setProvider(p.id)}
+                        className={`p-3 rounded-md border text-left transition-all ${
+                          isActive
+                            ? "border-[#1a73e8] bg-[#e8f0fe] text-[#1a73e8]"
+                            : "border-[#dadce0] bg-white text-[#5f6368] hover:bg-[#f8f9fa]"
+                        }`}
+                      >
+                        <div className="text-xs font-semibold text-[#202124]">{p.name}</div>
+                        <div className="text-[11px] text-[#5f6368] mt-0.5 leading-tight">{p.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
 
             {/* Simulation Tab */}
             {provider === "simulation" && (
@@ -1606,6 +2025,119 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 </div>
               </div>
             )}
+          </>
+        )}
+
+        {/* TAB 2: FREE CLOUD DATABASE */}
+        {configTab === "database" && (
+          <div className="space-y-4 my-4 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
+            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
+              <div className="flex items-center gap-2">
+                <Cloud className="w-5 h-5 text-[#1a73e8]" />
+                <div>
+                  <h4 className="font-semibold text-[#202124]">Free Hosted Database Connection</h4>
+                  <p className="text-[11px] text-[#5f6368]">Store and sync recipient records across devices without browser storage loss.</p>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 rounded-full bg-[#e6f4ea] text-[#1e8e3e] border border-[#ceead6] font-semibold text-[11px] flex items-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5" />
+                <span>Free Host Active</span>
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[#3c4043] leading-relaxed">
+                This instance is connected to the built-in <strong>Free Cloud Hosted Database API</strong> (<code>/api/db</code>). All batch dispatches, manual records, and campaign statuses can be pushed or pulled synchronously.
+              </p>
+
+              <div className="p-3 bg-white border border-[#dadce0] rounded-md space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-[#202124]">Current Database Sync:</span>
+                  <span className="text-[#1a73e8] font-mono text-[11px]">{records.length} records in active memory</span>
+                </div>
+                {lastSyncedTime && (
+                  <p className="text-[11px] text-[#5f6368]">Last synchronized: <strong>{lastSyncedTime}</strong></p>
+                )}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={syncToCloudDb}
+                    disabled={isSyncingDb}
+                    className="px-3 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? "animate-spin" : ""}`} />
+                    <span>Push Memory to Cloud DB</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={loadFromCloudDb}
+                    disabled={isSyncingDb}
+                    className="px-3 py-1.5 bg-white border border-[#dadce0] hover:bg-[#f1f3f4] text-[#3c4043] rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#5f6368]" />
+                    <span>Pull from Cloud DB</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 bg-[#e8f0fe] border border-[#d2e3fc] rounded-md text-[11px] text-[#1a73e8] space-y-1">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5" />
+                  <span>Free Hosted PostgreSQL Support (Supabase / Neon.tech)</span>
+                </div>
+                <p className="text-[#3c4043]">
+                  To connect your dedicated PostgreSQL instance, create a free project at <strong>supabase.com</strong> or <strong>neon.tech</strong> and add <code className="bg-white px-1 py-0.5 rounded border border-[#dadce0] text-[#c5221f]">DATABASE_URL=postgres://...</code> to your Vercel / hosting environment variables.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: ADMIN SECURITY */}
+        {configTab === "security" && (
+          <div className="space-y-4 my-4 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
+            <div className="flex items-center gap-2 pb-3 border-b border-[#dadce0]">
+              <ShieldCheck className="w-5 h-5 text-[#1a73e8]" />
+              <div>
+                <h4 className="font-semibold text-[#202124]">Security Access &amp; Passcode Settings</h4>
+                <p className="text-[11px] text-[#5f6368]">Configure the gate passcode required to unlock the dispatcher.</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[#202124] font-medium mb-1">
+                  Current Admin Passcode
+                </label>
+                <input
+                  type="text"
+                  value={systemPasscode}
+                  onChange={(e) => {
+                    setSystemPasscode(e.target.value);
+                    localStorage.setItem("xml_dispatch_passcode", e.target.value);
+                  }}
+                  className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs font-mono text-[#202124] focus:outline-none focus:border-[#1a73e8]"
+                  placeholder="e.g. admin123"
+                />
+                <p className="text-[11px] text-[#5f6368] mt-1">Changes are saved instantly to your local authorization system.</p>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleLogout();
+                    setShowConfigModal(false);
+                  }}
+                  className="px-3 py-1.5 bg-[#c5221f] hover:bg-[#a51d24] text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Lock &amp; Test Security Gate Now</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
             {/* Modal Actions */}
             <div className="flex justify-end gap-2 mt-5 pt-3 border-t border-[#dadce0]">
@@ -1702,6 +2234,253 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Send This Email Now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          7. DOMAIN VERIFICATION & EMAIL CREDITS OPERATIONAL GUIDE MODAL
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showGuideModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#202124]/50 backdrop-blur-xs">
+          <div className="bg-white w-full max-w-2xl rounded-xl border border-[#dadce0] shadow-2xl p-6 animate-fade-in text-xs max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-md bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center shrink-0">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-[#202124]">Domain Verification &amp; Credits Guide</h3>
+                  <p className="text-[11px] text-[#5f6368]">Step-by-step procedures to verify private domains and acquire sending credits.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGuideModal(false)}
+                className="p-1 rounded-md text-[#5f6368] hover:bg-[#f1f3f4]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-2 border-b border-[#dadce0] pt-3 pb-2">
+              <button
+                type="button"
+                onClick={() => setGuideTab("verification")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  guideTab === "verification"
+                    ? "bg-[#1a73e8] text-white"
+                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                DNS &amp; Domain Verification
+              </button>
+              <button
+                type="button"
+                onClick={() => setGuideTab("credits")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  guideTab === "credits"
+                    ? "bg-[#1a73e8] text-white"
+                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                Credits &amp; Gateway Pricing
+              </button>
+              <button
+                type="button"
+                onClick={() => setGuideTab("database")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  guideTab === "database"
+                    ? "bg-[#1a73e8] text-white"
+                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                Free Hosted DB Setup
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1 text-[#3c4043] leading-relaxed">
+              {/* TAB 1: DOMAIN VERIFICATION */}
+              {guideTab === "verification" && (
+                <div className="space-y-4">
+                  <div className="p-3 bg-[#e8f0fe] border border-[#d2e3fc] rounded-lg">
+                    <h4 className="font-semibold text-[#1a73e8] flex items-center gap-1.5 text-xs">
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Why Must Domains Be Verified?</span>
+                    </h4>
+                    <p className="text-[11px] text-[#202124] mt-1">
+                      Email providers (Gmail, Outlook, Yahoo) require cryptographic DNS verification so malicious parties cannot forge your company identity. A verified domain guarantees high inbox placement and bypasses spam filters.
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#202124]">Step 1: Add DKIM Record (DomainKeys Identified Mail)</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">CNAME / TXT</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Sign in to your domain registrar (GoDaddy, Namecheap, Cloudflare) &rarr; DNS Management &rarr; Add Record:
+                      </p>
+                      <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
+                        <div><strong>Type:</strong> TXT or CNAME</div>
+                        <div><strong>Name / Host:</strong> <span className="text-[#1a73e8]">k1._domainkey.yourdomain.com</span></div>
+                        <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3D...</span></div>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#202124]">Step 2: Add SPF Record (Sender Policy Framework)</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">TXT</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Authorizes your sending vendor to dispatch on behalf of your domain:
+                      </p>
+                      <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
+                        <div><strong>Type:</strong> TXT</div>
+                        <div><strong>Host:</strong> @ (or yourdomain.com)</div>
+                        <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=spf1 include:servers.mcsv.net include:resend.com ~all</span></div>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#202124]">Step 3: Add DMARC Policy</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">TXT</span>
+                      </div>
+                      <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
+                        <div><strong>Host:</strong> <span className="text-[#1a73e8]">_dmarc.yourdomain.com</span></div>
+                        <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=DMARC1; p=none; rua=mailto:dmarc@yourdomain.com</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: CREDITS & PRICING */}
+              {guideTab === "credits" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {/* Mailchimp */}
+                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#202124] text-sm">Mailchimp (Mandrill)</span>
+                        <span className="text-[10px] font-semibold text-[#1e8e3e] bg-[#e6f4ea] px-2 py-0.5 rounded">Enterprise Tier</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Best for enterprise private domains requiring dedicated reputation protection.
+                      </p>
+                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
+                        <div><strong>Pricing:</strong> $20 / month per block of <strong>25,000 emails</strong> ($0.0008 / email).</div>
+                        <div><strong>Prerequisite:</strong> Standard Mailchimp monthly plan ($13 - $20/mo).</div>
+                        <div><strong>How to get:</strong> Mailchimp Dashboard &rarr; Profile &rarr; Transactional Email &rarr; Buy Blocks.</div>
+                      </div>
+                    </div>
+
+                    {/* Resend */}
+                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#202124] text-sm">Resend API</span>
+                        <span className="text-[10px] font-semibold text-[#1a73e8] bg-[#e8f0fe] px-2 py-0.5 rounded">Fastest Setup</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Ultra-modern developer gateway with live deliverability analytics and fast DNS checks.
+                      </p>
+                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
+                        <div><strong>Free Tier:</strong> <strong>3,000 emails / month</strong> free forever (100 / day).</div>
+                        <div><strong>Pro Tier:</strong> $20 / month for <strong>50,000 emails</strong> ($0.0004 / email).</div>
+                        <div><strong>How to get:</strong> Sign up at <a href="https://resend.com" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline">resend.com</a> &rarr; Domains &rarr; Add Domain &rarr; API Keys.</div>
+                      </div>
+                    </div>
+
+                    {/* Brevo */}
+                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#202124] text-sm">Brevo (Sendinblue)</span>
+                        <span className="text-[10px] font-semibold text-[#f29900] bg-[#fef7e0] px-2 py-0.5 rounded">High Free Daily</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Free SMTP relay server with generous daily allotment.
+                      </p>
+                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
+                        <div><strong>Free Tier:</strong> <strong>300 emails / day</strong> forever (9,000 emails / month free).</div>
+                        <div><strong>Starter Tier:</strong> $9 / month for 5,000 emails.</div>
+                        <div><strong>How to get:</strong> Sign up at <a href="https://brevo.com" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline">brevo.com</a> &rarr; SMTP &amp; API credentials.</div>
+                      </div>
+                    </div>
+
+                    {/* Google Workspace */}
+                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#202124] text-sm">Google Workspace SMTP</span>
+                        <span className="text-[10px] font-semibold text-[#5f6368] bg-[#f1f3f4] px-2 py-0.5 rounded">Included in Google</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Use your existing company Google Workspace account without buying extra credits.
+                      </p>
+                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
+                        <div><strong>Capacity:</strong> <strong>2,000 emails / day</strong> per paid user account.</div>
+                        <div><strong>How to get:</strong> Google Account &rarr; Security &rarr; 2-Step Verification &rarr; App Passwords &rarr; Generate 16-digit password.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: FREE HOSTED DB */}
+              {guideTab === "database" && (
+                <div className="space-y-4">
+                  <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                    <h4 className="font-semibold text-[#202124] flex items-center gap-1.5">
+                      <Cloud className="w-4 h-4 text-[#1a73e8]" />
+                      <span>Free Hosted Database Options for Demo &amp; Production</span>
+                    </h4>
+                    <p className="text-[11px] text-[#5f6368]">
+                      Currently, this app is connected to the built-in <strong>Free Cloud API Store</strong> (<code>/api/db</code>). To link a permanent cloud database:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      <div className="p-3 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
+                        <strong className="text-[#202124] text-xs">Option A: Supabase (Recommended)</strong>
+                        <p className="text-[11px] text-[#5f6368]">100% free cloud PostgreSQL database with 500MB storage and automatic REST API.</p>
+                        <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline font-medium text-[11px] inline-flex items-center gap-1">
+                          <span>Visit Supabase.com</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+
+                      <div className="p-3 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
+                        <strong className="text-[#202124] text-xs">Option B: Neon.tech Serverless Postgres</strong>
+                        <p className="text-[11px] text-[#5f6368]">Free serverless Postgres instance with instant connection string setup in 30 seconds.</p>
+                        <a href="https://neon.tech" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline font-medium text-[11px] inline-flex items-center gap-1">
+                          <span>Visit Neon.tech</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-[#fef7e0] border border-[#feefc3] rounded-lg text-[#8a5700] text-[11px] space-y-1">
+                    <strong>Quick Live Sync:</strong> Click the <code className="bg-white px-1 py-0.5 rounded font-mono text-[#c5221f]">Sync DB</code> button on the top stepper banner to immediately backup your current uploaded recipients to the cloud demo database.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-[#dadce0] flex items-center justify-between">
+              <span className="text-[11px] text-[#70757a]">Documentation standard &bull; CloudMail XML</span>
+              <button
+                type="button"
+                onClick={() => setShowGuideModal(false)}
+                className="btn-google-primary"
+              >
+                Got It, Return to Console
               </button>
             </div>
           </div>

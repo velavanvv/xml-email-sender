@@ -2,12 +2,50 @@ import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 
+// Helper to prepare real attachments for Nodemailer and Resend
+function prepareAttachments(record, commonAttachment) {
+  const attachments = [];
+
+  const addAttachment = (pathOrData, filename) => {
+    if (!pathOrData) return;
+    if (pathOrData.startsWith("data:")) {
+      const match = pathOrData.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        attachments.push({
+          filename: filename || "attachment.pdf",
+          content: Buffer.from(match[2], "base64"),
+          contentType: match[1],
+        });
+      }
+    } else if (pathOrData.startsWith("http")) {
+      attachments.push({
+        path: pathOrData,
+        filename: filename || pathOrData.split("/").pop() || "attachment.pdf",
+      });
+    }
+  };
+
+  // 1. Record-level attachment
+  if (record.attachment_data) {
+    addAttachment(record.attachment_data, record.attachment_name || "attachment.pdf");
+  } else if (record.attachment_path) {
+    addAttachment(record.attachment_path, record.attachment_name || record.attachment_path.split("/").pop() || "attachment.pdf");
+  }
+
+  // 2. Global batch common attachment
+  if (commonAttachment && commonAttachment.data) {
+    addAttachment(commonAttachment.data, commonAttachment.name || "common_document.pdf");
+  }
+
+  return attachments;
+}
+
 export async function POST(req) {
   try {
     const body = await req.json();
     const {
       records = [],
-      provider = "simulation", // "simulation", "resend", "smtp"
+      provider = "simulation", // "simulation", "resend", "smtp", "mailchimp"
       resendApiKey = process.env.RESEND_API_KEY || "",
       fromEmail = process.env.FROM_EMAIL || "onboarding@resend.dev",
       fromName = process.env.FROM_NAME || "Dispatch Demo",
@@ -15,6 +53,7 @@ export async function POST(req) {
       useCommonBody = false,
       commonSubject = "",
       commonBodyTemplate = "",
+      commonAttachment = null,
     } = body;
 
     if (!records || records.length === 0) {
@@ -28,7 +67,7 @@ export async function POST(req) {
       if (!template) return "";
       let res = template;
       res = res.replace(/\{email\}/gi, item.recipient_email || "");
-      res = res.replace(/\{attachment\}/gi, item.attachment_path || "");
+      res = res.replace(/\{attachment\}/gi, item.attachment_name || (item.attachment_path ? item.attachment_path.split("/").pop() : "") || "");
       if (item.extra_fields) {
         for (const [key, val] of Object.entries(item.extra_fields)) {
           const regex = new RegExp(`\\{${key}\\}`, "gi");
@@ -38,14 +77,12 @@ export async function POST(req) {
       return res;
     };
 
-    // 1. SIMULATION / DEMO MODE (Ideal for customer showcase without API setup)
+    // 1. SIMULATION / DEMO MODE
     if (provider === "simulation") {
       for (const record of records) {
-        // Basic email syntax validation
         const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.recipient_email);
         
-        // Artificial micro-delay for realistic live batch feel
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 200));
 
         if (!isValidEmail) {
           results.push({
@@ -54,10 +91,13 @@ export async function POST(req) {
             status_message: "Invalid recipient email address format.",
           });
         } else {
+          const attached = prepareAttachments(record, commonAttachment);
+          const attachNames = attached.map((a) => a.filename).join(", ") || "None";
+
           results.push({
             id: record.id,
             status: "sent",
-            status_message: `Sent successfully via Simulator (Simulated Attachment: ${record.attachment_path ? record.attachment_path.split("/").pop() || record.attachment_path : "None"})`,
+            status_message: `Sent via Simulator (Attachments: ${attachNames})`,
             sent_at: new Date().toISOString(),
           });
         }
@@ -90,14 +130,13 @@ export async function POST(req) {
             html: `<div style="font-family: sans-serif; line-height: 1.5; color: #1e293b;">${emailContent.replace(/\n/g, "<br/>")}</div>`,
           };
 
-          // Attachments handling (if accessible via URL or base64)
-          if (record.attachment_path && record.attachment_path.startsWith("http")) {
-            emailPayload.attachments = [
-              {
-                path: record.attachment_path,
-                filename: record.attachment_path.split("/").pop() || "attachment.pdf",
-              }
-            ];
+          const attached = prepareAttachments(record, commonAttachment);
+          if (attached.length > 0) {
+            emailPayload.attachments = attached.map((att) => ({
+              filename: att.filename,
+              content: att.content ? att.content.toString("base64") : undefined,
+              path: att.path,
+            }));
           }
 
           const response = await resend.emails.send(emailPayload);
@@ -122,7 +161,7 @@ export async function POST(req) {
         } catch (err) {
           let errorMsg = err.message;
           if (err.statusCode === 403 || errorMsg.includes("403")) {
-            errorMsg = "403 Forbidden: Resend's free onboarding@resend.dev only allows sending to your own registered Resend email. To send to any email, verify your domain in Resend, or switch to Gmail SMTP.";
+            errorMsg = "403 Forbidden: Resend's free onboarding@resend.dev only allows sending to your own registered email. Verify your domain in Resend or switch to Gmail SMTP.";
           }
           results.push({
             id: record.id,
@@ -164,12 +203,9 @@ export async function POST(req) {
             html: `<p>${emailContent.replace(/\n/g, "<br/>")}</p>`,
           };
 
-          if (record.attachment_path && record.attachment_path.startsWith("http")) {
-            mailOptions.attachments = [
-              {
-                path: record.attachment_path,
-              }
-            ];
+          const attached = prepareAttachments(record, commonAttachment);
+          if (attached.length > 0) {
+            mailOptions.attachments = attached;
           }
 
           const info = await transporter.sendMail(mailOptions);
@@ -207,7 +243,6 @@ export async function POST(req) {
         }, { status: 400 });
       }
 
-      // Mandrill (Mailchimp Transactional) SMTP relay
       const transporter = nodemailer.createTransport({
         host: "smtp.mandrillapp.com",
         port: 587,
@@ -231,13 +266,9 @@ export async function POST(req) {
             html: `<div style="font-family: sans-serif; line-height: 1.5; color: #1e293b;">${emailContent.replace(/\n/g, "<br/>")}</div>`,
           };
 
-          if (record.attachment_path && record.attachment_path.startsWith("http")) {
-            mailOptions.attachments = [
-              {
-                path: record.attachment_path,
-                filename: record.attachment_path.split("/").pop() || "document.pdf",
-              }
-            ];
+          const attached = prepareAttachments(record, commonAttachment);
+          if (attached.length > 0) {
+            mailOptions.attachments = attached;
           }
 
           const info = await transporter.sendMail(mailOptions);
