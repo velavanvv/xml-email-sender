@@ -42,8 +42,31 @@ import {
   DollarSign,
   CheckCircle2,
   HelpCircle,
+  Copy,
 } from "lucide-react";
 import confetti from "canvas-confetti";
+
+const SUPABASE_SQL_SCHEMA = `-- XML Email Dispatcher Table Schema for Supabase
+CREATE TABLE IF NOT EXISTS email_records (
+  id TEXT PRIMARY KEY,
+  recipient_email TEXT NOT NULL,
+  subject TEXT,
+  message TEXT,
+  attachment_path TEXT,
+  attachment_name TEXT,
+  attachment_data TEXT,
+  attachment_size TEXT,
+  extra_fields JSONB DEFAULT '{}'::jsonb,
+  status TEXT DEFAULT 'pending',
+  status_message TEXT,
+  batch_name TEXT,
+  sent_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable Row Level Security (RLS) & allow read/write access
+ALTER TABLE email_records ENABLE ROW LEVEL SECURITY;
+CREATE POLICY IF NOT EXISTS "Allow all access" ON email_records FOR ALL USING (true);`;
 
 const DEFAULT_DEMO_RECORDS = [
   {
@@ -130,6 +153,10 @@ export default function EnterpriseEmailDashboard() {
   const [isSyncingDb, setIsSyncingDb] = useState(false);
   const [cloudDbStatus, setCloudDbStatus] = useState("Connected (Free Demo Host)");
   const [lastSyncedTime, setLastSyncedTime] = useState("");
+  const [customDbUrl, setCustomDbUrl] = useState("");
+  const [isCreatingTable, setIsCreatingTable] = useState(false);
+  const [sqlCopied, setSqlCopied] = useState(false);
+  const [dbConnectionStatus, setDbConnectionStatus] = useState(null);
 
   // Domain Verification & Credits Guide Modal
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -208,6 +235,9 @@ export default function EnterpriseEmailDashboard() {
       if (sessionAuth === "true" || localAuth === "true") {
         setIsAuthenticated(true);
       }
+
+      const savedDbUrl = localStorage.getItem("xml_dispatch_db_url") || "";
+      if (savedDbUrl) setCustomDbUrl(savedDbUrl);
     } catch (e) {
       console.warn("Could not read from local storage", e);
     }
@@ -247,20 +277,90 @@ export default function EnterpriseEmailDashboard() {
   };
 
   // Free Hosted Cloud DB Handlers
-  const syncToCloudDb = async () => {
-    setIsSyncingDb(true);
+  const handleSaveDbUrl = (val) => {
+    setCustomDbUrl(val);
+    try {
+      localStorage.setItem("xml_dispatch_db_url", val);
+    } catch (e) {
+      console.warn("Storage error", e);
+    }
+  };
+
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
+    setSqlCopied(true);
+    setTimeout(() => setSqlCopied(false), 2500);
+  };
+
+  const handleInitSupabaseTable = async () => {
+    if (!customDbUrl.trim()) {
+      alert("Please paste your Supabase connection string first (from Project Settings -> Database).");
+      return;
+    }
+    setIsCreatingTable(true);
+    setDbConnectionStatus(null);
     try {
       const res = await fetch("/api/db", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ records }),
+        headers: {
+          "Content-Type": "application/json",
+          "x-database-url": customDbUrl.trim(),
+        },
+        body: JSON.stringify({
+          action: "init_table",
+          connectionString: customDbUrl.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDbConnectionStatus({
+          success: true,
+          message: data.message,
+          rowCount: data.rowCount,
+          host: data.host,
+        });
+        setCloudDbStatus("Connected to Supabase PostgreSQL");
+        alert(data.message);
+      } else {
+        setDbConnectionStatus({
+          success: false,
+          message: data.error || "Failed to initialize table in Supabase",
+          suggestion: data.suggestion,
+        });
+        alert(`❌ Supabase Error: ${data.error}\n\n${data.suggestion || ""}`);
+      }
+    } catch (err) {
+      setDbConnectionStatus({
+        success: false,
+        message: err.message,
+      });
+      alert("Database connection failed: " + err.message);
+    } finally {
+      setIsCreatingTable(false);
+    }
+  };
+
+  const syncToCloudDb = async () => {
+    setIsSyncingDb(true);
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (customDbUrl.trim()) {
+        headers["x-database-url"] = customDbUrl.trim();
+      }
+      const res = await fetch("/api/db", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          records,
+          connectionString: customDbUrl.trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
         setLastSyncedTime(new Date().toLocaleTimeString());
-        alert(`✅ Cloud DB Synchronized! ${data.count} records saved to free hosted storage.`);
+        alert(`✅ Cloud DB Synchronized! ${data.count} records saved to ${data.host || "cloud storage"}.`);
       } else {
-        alert("Sync error: " + data.error);
+        alert("Sync error: " + data.error + (data.suggestion ? `\n\n${data.suggestion}` : ""));
       }
     } catch (err) {
       alert("Cloud DB sync failed: " + err.message);
@@ -272,14 +372,20 @@ export default function EnterpriseEmailDashboard() {
   const loadFromCloudDb = async () => {
     setIsSyncingDb(true);
     try {
-      const res = await fetch("/api/db");
+      const headers = {};
+      let url = "/api/db";
+      if (customDbUrl.trim()) {
+        headers["x-database-url"] = customDbUrl.trim();
+        url = `/api/db?connectionString=${encodeURIComponent(customDbUrl.trim())}`;
+      }
+      const res = await fetch(url, { headers });
       const data = await res.json();
       if (res.ok && data.records) {
         setRecords(data.records);
         setLastSyncedTime(new Date().toLocaleTimeString());
-        alert(`✅ Loaded ${data.records.length} records from Free Cloud DB!`);
+        alert(`✅ Loaded ${data.records.length} records from ${data.host || "Cloud DB"}!`);
       } else {
-        alert("Load error: " + data.error);
+        alert("Load error: " + data.error + (data.suggestion ? `\n\n${data.suggestion}` : ""));
       }
     } catch (err) {
       alert("Failed to load from Cloud DB: " + err.message);
@@ -287,6 +393,7 @@ export default function EnterpriseEmailDashboard() {
       setIsSyncingDb(false);
     }
   };
+
 
   // Real File Attachment Handlers
   const handleModalAttachmentFile = (e) => {
@@ -2033,62 +2140,151 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
           <div className="space-y-4 my-4 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
             <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
               <div className="flex items-center gap-2">
-                <Cloud className="w-5 h-5 text-[#1a73e8]" />
+                <Database className="w-5 h-5 text-[#1a73e8]" />
                 <div>
-                  <h4 className="font-semibold text-[#202124]">Free Hosted Database Connection</h4>
-                  <p className="text-[11px] text-[#5f6368]">Store and sync recipient records across devices without browser storage loss.</p>
+                  <h4 className="font-semibold text-[#202124]">PostgreSQL / Supabase Database Sync</h4>
+                  <p className="text-[11px] text-[#5f6368]">Connect your free Supabase or Neon cloud PostgreSQL database to store and sync email dispatches.</p>
                 </div>
               </div>
-              <span className="px-2.5 py-1 rounded-full bg-[#e6f4ea] text-[#1e8e3e] border border-[#ceead6] font-semibold text-[11px] flex items-center gap-1">
-                <CheckCircle className="w-3.5 h-3.5" />
-                <span>Free Host Active</span>
-              </span>
+              {customDbUrl ? (
+                <span className="px-2.5 py-1 rounded-full bg-[#e6f4ea] text-[#1e8e3e] border border-[#ceead6] font-semibold text-[11px] flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Supabase Configured</span>
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full bg-[#fef7e0] text-[#b06000] border border-[#feefc3] font-semibold text-[11px] flex items-center gap-1">
+                  <Info className="w-3.5 h-3.5" />
+                  <span>Free Demo Host Active</span>
+                </span>
+              )}
             </div>
 
-            <div className="space-y-2">
-              <p className="text-[#3c4043] leading-relaxed">
-                This instance is connected to the built-in <strong>Free Cloud Hosted Database API</strong> (<code>/api/db</code>). All batch dispatches, manual records, and campaign statuses can be pushed or pulled synchronously.
+            {/* Supabase Connection String Input */}
+            <div className="space-y-2 bg-white p-3.5 rounded-lg border border-[#dadce0]">
+              <div className="flex items-center justify-between">
+                <label className="font-medium text-[#202124] flex items-center gap-1.5">
+                  <Server className="w-3.5 h-3.5 text-[#1a73e8]" />
+                  <span>Supabase Connection String (DATABASE_URL)</span>
+                </label>
+                <a
+                  href="https://supabase.com/dashboard/project/_/settings/database"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[#1a73e8] hover:underline text-[11px] inline-flex items-center gap-1"
+                >
+                  <span>Supabase Database Settings</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+              <p className="text-[11px] text-[#5f6368]">
+                Paste your Supabase URI connection string (from Supabase Dashboard &rarr; Project Settings &rarr; Database &rarr; Connection string URI):
               </p>
-
-              <div className="p-3 bg-white border border-[#dadce0] rounded-md space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-[#202124]">Current Database Sync:</span>
-                  <span className="text-[#1a73e8] font-mono text-[11px]">{records.length} records in active memory</span>
-                </div>
-                {lastSyncedTime && (
-                  <p className="text-[11px] text-[#5f6368]">Last synchronized: <strong>{lastSyncedTime}</strong></p>
-                )}
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={syncToCloudDb}
-                    disabled={isSyncingDb}
-                    className="px-3 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? "animate-spin" : ""}`} />
-                    <span>Push Memory to Cloud DB</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={loadFromCloudDb}
-                    disabled={isSyncingDb}
-                    className="px-3 py-1.5 bg-white border border-[#dadce0] hover:bg-[#f1f3f4] text-[#3c4043] rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
-                  >
-                    <Download className="w-3.5 h-3.5 text-[#5f6368]" />
-                    <span>Pull from Cloud DB</span>
-                  </button>
-                </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="password"
+                  value={customDbUrl}
+                  onChange={(e) => handleSaveDbUrl(e.target.value)}
+                  placeholder="postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require"
+                  className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded-md px-3 py-2 text-xs font-mono text-[#202124] focus:bg-white focus:outline-none focus:border-[#1a73e8]"
+                />
+                <button
+                  type="button"
+                  onClick={handleInitSupabaseTable}
+                  disabled={isCreatingTable || !customDbUrl.trim()}
+                  className="px-3.5 py-2 bg-[#1e8e3e] hover:bg-[#188038] disabled:opacity-50 text-white rounded text-xs font-medium inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors shadow-sm"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCreatingTable ? "animate-spin" : ""}`} />
+                  <span>{isCreatingTable ? "Connecting..." : "⚡ Auto-Create Table in Supabase"}</span>
+                </button>
               </div>
 
-              <div className="p-3 bg-[#e8f0fe] border border-[#d2e3fc] rounded-md text-[11px] text-[#1a73e8] space-y-1">
-                <div className="font-semibold flex items-center gap-1.5">
-                  <Database className="w-3.5 h-3.5" />
-                  <span>Free Hosted PostgreSQL Support (Supabase / Neon.tech)</span>
+              {/* Status Alert Banner */}
+              {dbConnectionStatus && (
+                <div
+                  className={`p-2.5 rounded-md text-[11px] flex items-start gap-2 ${
+                    dbConnectionStatus.success
+                      ? "bg-[#e6f4ea] text-[#137333] border border-[#ceead6]"
+                      : "bg-[#fce8e6] text-[#c5221f] border border-[#fad2cf]"
+                  }`}
+                >
+                  {dbConnectionStatus.success ? (
+                    <CheckCircle className="w-4 h-4 shrink-0 text-[#1e8e3e] mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-[#d93025] mt-0.5" />
+                  )}
+                  <div className="space-y-0.5">
+                    <strong>{dbConnectionStatus.success ? "Connection Verified & Table Created:" : "Connection Error:"}</strong>
+                    <p>{dbConnectionStatus.message}</p>
+                    {dbConnectionStatus.suggestion && (
+                      <p className="text-[10px] text-[#5f6368]">{dbConnectionStatus.suggestion}</p>
+                    )}
+                  </div>
                 </div>
-                <p className="text-[#3c4043]">
-                  To connect your dedicated PostgreSQL instance, create a free project at <strong>supabase.com</strong> or <strong>neon.tech</strong> and add <code className="bg-white px-1 py-0.5 rounded border border-[#dadce0] text-[#c5221f]">DATABASE_URL=postgres://...</code> to your Vercel / hosting environment variables.
-                </p>
+              )}
+            </div>
+
+            {/* Sync Controls */}
+            <div className="p-3 bg-white border border-[#dadce0] rounded-md space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-[#202124]">Live Sync Memory:</span>
+                <span className="text-[#1a73e8] font-mono text-[11px]">{records.length} records ready</span>
               </div>
+              {lastSyncedTime && (
+                <p className="text-[11px] text-[#5f6368]">Last synchronized: <strong>{lastSyncedTime}</strong></p>
+              )}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={syncToCloudDb}
+                  disabled={isSyncingDb}
+                  className="px-3.5 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? "animate-spin" : ""}`} />
+                  <span>Push Records to Database</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={loadFromCloudDb}
+                  disabled={isSyncingDb}
+                  className="px-3.5 py-1.5 bg-white border border-[#dadce0] hover:bg-[#f1f3f4] text-[#3c4043] rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#5f6368]" />
+                  <span>Pull from Database</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Supabase 1-Click SQL Script Box */}
+            <div className="p-3.5 bg-white border border-[#dadce0] rounded-md space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-[#202124] flex items-center gap-1.5">
+                  <FileCode className="w-4 h-4 text-[#1a73e8]" />
+                  <span>Or Run SQL Script Directly in Supabase SQL Editor:</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopySql}
+                  className="px-2.5 py-1 bg-[#f1f3f4] hover:bg-[#e8eaed] text-[#202124] border border-[#dadce0] rounded text-[11px] font-medium inline-flex items-center gap-1 transition-colors"
+                >
+                  {sqlCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-[#1e8e3e]" />
+                      <span className="text-[#1e8e3e] font-semibold">Copied SQL!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-[#5f6368]" />
+                      <span>Copy SQL Query</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-[11px] text-[#5f6368]">
+                If your table does not show up automatically, click <strong>Copy SQL Query</strong>, open your <strong>Supabase Dashboard &rarr; SQL Editor</strong>, paste this script and click <strong>Run</strong>:
+              </p>
+              <pre className="p-2.5 bg-[#202124] text-[#e8eaed] font-mono text-[10px] rounded-md overflow-x-auto leading-relaxed border border-[#3c4043]">
+                {SUPABASE_SQL_SCHEMA}
+              </pre>
             </div>
           </div>
         )}
@@ -2437,36 +2633,59 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 <div className="space-y-4">
                   <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
                     <h4 className="font-semibold text-[#202124] flex items-center gap-1.5">
-                      <Cloud className="w-4 h-4 text-[#1a73e8]" />
-                      <span>Free Hosted Database Options for Demo &amp; Production</span>
+                      <Database className="w-4 h-4 text-[#1a73e8]" />
+                      <span>Free Hosted PostgreSQL Database Setup (Supabase)</span>
                     </h4>
                     <p className="text-[11px] text-[#5f6368]">
-                      Currently, this app is connected to the built-in <strong>Free Cloud API Store</strong> (<code>/api/db</code>). To link a permanent cloud database:
+                      Follow these 3 quick steps to initialize your free database table in Supabase:
                     </p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                      <div className="p-3 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
-                        <strong className="text-[#202124] text-xs">Option A: Supabase (Recommended)</strong>
-                        <p className="text-[11px] text-[#5f6368]">100% free cloud PostgreSQL database with 500MB storage and automatic REST API.</p>
-                        <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline font-medium text-[11px] inline-flex items-center gap-1">
-                          <span>Visit Supabase.com</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
+                    <div className="space-y-2 pt-1 text-[11px]">
+                      <div className="p-2.5 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
+                        <strong className="text-[#202124]">Step 1: Get Connection URI from Supabase</strong>
+                        <p className="text-[#5f6368]">
+                          Go to <strong>supabase.com &rarr; Project Settings &rarr; Database &rarr; Connection string (URI)</strong> and copy the connection string.
+                        </p>
                       </div>
 
-                      <div className="p-3 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
-                        <strong className="text-[#202124] text-xs">Option B: Neon.tech Serverless Postgres</strong>
-                        <p className="text-[11px] text-[#5f6368]">Free serverless Postgres instance with instant connection string setup in 30 seconds.</p>
-                        <a href="https://neon.tech" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline font-medium text-[11px] inline-flex items-center gap-1">
-                          <span>Visit Neon.tech</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
+                      <div className="p-2.5 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
+                        <strong className="text-[#202124]">Step 2: Auto-Create Table or Run SQL</strong>
+                        <p className="text-[#5f6368]">
+                          Open <strong>Settings &rarr; Database Tab</strong> in this app, paste your URI, and click <strong>&quot;⚡ Auto-Create Table in Supabase&quot;</strong>. Or run the SQL script below directly in Supabase SQL Editor.
+                        </p>
                       </div>
+                    </div>
+
+                    {/* SQL Box */}
+                    <div className="pt-2">
+                      <div className="flex items-center justify-between pb-1">
+                        <span className="font-semibold text-[#202124] text-[11px]">Supabase SQL Editor Schema:</span>
+                        <button
+                          type="button"
+                          onClick={handleCopySql}
+                          className="px-2.5 py-1 bg-[#f1f3f4] hover:bg-[#e8eaed] text-[#202124] border border-[#dadce0] rounded text-[11px] font-medium inline-flex items-center gap-1 transition-colors"
+                        >
+                          {sqlCopied ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-[#1e8e3e]" />
+                              <span className="text-[#1e8e3e] font-semibold">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-[#5f6368]" />
+                              <span>Copy SQL</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <pre className="p-2.5 bg-[#202124] text-[#e8eaed] font-mono text-[10px] rounded-md overflow-x-auto leading-relaxed border border-[#3c4043]">
+                        {SUPABASE_SQL_SCHEMA}
+                      </pre>
                     </div>
                   </div>
 
-                  <div className="p-3 bg-[#fef7e0] border border-[#feefc3] rounded-lg text-[#8a5700] text-[11px] space-y-1">
-                    <strong>Quick Live Sync:</strong> Click the <code className="bg-white px-1 py-0.5 rounded font-mono text-[#c5221f]">Sync DB</code> button on the top stepper banner to immediately backup your current uploaded recipients to the cloud demo database.
+                  <div className="p-3 bg-[#e8f0fe] border border-[#d2e3fc] rounded-lg text-[#1a73e8] text-[11px] space-y-1">
+                    <strong>Quick Test:</strong> After running the SQL or linking your connection string, click <code className="bg-white px-1 py-0.5 rounded font-mono text-[#1a73e8] border border-[#dadce0]">Push Records to Database</code> to store all recipient records instantly.
                   </div>
                 </div>
               )}
