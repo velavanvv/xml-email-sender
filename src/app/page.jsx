@@ -2180,6 +2180,9 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               <p className="text-[11px] text-[#5f6368]">
                 Paste your Supabase URI connection string (from Supabase Dashboard &rarr; Project Settings &rarr; Database &rarr; Connection string URI):
               </p>
+              <div className="p-2 bg-[#fef7e0] border border-[#feefc3] rounded text-[11px] text-[#8a5700] space-y-0.5">
+                <strong>⚠️ Required for Vercel:</strong> In Supabase, select <strong>Connection Pooling (Session or Transaction mode)</strong>, not Direct Connection. Host must look like <code className="bg-white px-1 py-0.5 rounded border border-[#dadce0] font-mono text-[#c5221f]">aws-0-[region].pooler.supabase.com:6543</code> (Direct <code className="font-mono text-[#5f6368]">db.[ref].supabase.co</code> causes <code>ENOTFOUND</code> on Vercel).
+              </div>
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="password"

@@ -90,6 +90,14 @@ function writeStorage(records) {
   }
 }
 
+function getSupabaseSuggestion(err, connStr = "") {
+  const msg = (err?.message || "").toLowerCase();
+  if (msg.includes("enotfound") || msg.includes("getaddrinfo") || connStr.includes("db.")) {
+    return "⚠️ IPv6 Direct connection (db.[ref].supabase.co) is not supported by Vercel serverless! In Supabase Dashboard -> Project Settings -> Database, under 'Connection string', switch to 'Connection Pooling' (host: aws-0-[region].pooler.supabase.com:6543 or 5432) and copy the Pooler URI.";
+  }
+  return "If using Supabase, ensure your connection string includes '?sslmode=require' and password is correct.";
+}
+
 // GET: Fetch records from Supabase Postgres or fallback store
 export async function GET(req) {
   let pool = null;
@@ -169,7 +177,7 @@ export async function GET(req) {
     console.error("API /api/db GET error:", err);
     return NextResponse.json({
       error: err.message,
-      suggestion: "If using Supabase, ensure your connection string includes '?sslmode=require' and password is correct.",
+      suggestion: getSupabaseSuggestion(err, connStr),
     }, { status: 500 });
   } finally {
     if (pool) {
@@ -299,7 +307,7 @@ export async function POST(req) {
     console.error("API /api/db POST error:", err);
     return NextResponse.json({
       error: err.message,
-      suggestion: "If using Supabase, check connection password and verify table permissions.",
+      suggestion: getSupabaseSuggestion(err, connStr),
     }, { status: 500 });
   } finally {
     if (pool) {
