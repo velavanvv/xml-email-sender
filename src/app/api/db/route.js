@@ -3,6 +3,9 @@ import pg from "pg";
 import fs from "fs";
 import path from "path";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 const { Pool } = pg;
 const MOCK_STORAGE_FILE = path.join("/tmp", "xml_dispatch_cloud_db.json");
 
@@ -66,13 +69,20 @@ function getPool(customConnStr = "") {
     throw error;
   }
 
-  return new Pool({
+  const pool = new Pool({
     connectionString: conn,
     ssl: {
       rejectUnauthorized: false,
     },
-    connectionTimeoutMillis: 4000,
+    connectionTimeoutMillis: 5000,
   });
+
+  // Guard against unhandled process crash on idle client errors
+  pool.on("error", (err) => {
+    console.error("Postgres pool unexpected background error:", err?.message || err);
+  });
+
+  return pool;
 }
 
 function readStorage() {
@@ -99,7 +109,7 @@ function writeStorage(records) {
 
 function getSupabaseSuggestion(err, connStr = "") {
   const msg = (err?.message || "").toLowerCase();
-  if (msg.includes("enotfound") || msg.includes("getaddrinfo") || connStr.includes("db.")) {
+  if (err?.code === "SUPABASE_IPV6_DIRECT_NOT_SUPPORTED" || msg.includes("enotfound") || msg.includes("getaddrinfo") || connStr.includes("db.")) {
     return "⚠️ IPv6 Direct connection (db.[ref].supabase.co) is not supported by Vercel serverless! In Supabase Dashboard -> Project Settings -> Database, under 'Connection string', switch to 'Connection Pooling' (host: aws-0-[region].pooler.supabase.com:6543 or 5432) and copy the Pooler URI.";
   }
   return "If using Supabase, ensure your connection string includes '?sslmode=require' and password is correct.";
@@ -108,12 +118,14 @@ function getSupabaseSuggestion(err, connStr = "") {
 // GET: Fetch records from Supabase Postgres or fallback store
 export async function GET(req) {
   let pool = null;
+  let connStr = "";
+
   try {
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action");
     const headerConn = req.headers.get("x-database-url") || "";
     const queryConn = searchParams.get("connectionString") || "";
-    const connStr = queryConn || headerConn;
+    connStr = (queryConn || headerConn).trim();
 
     pool = getPool(connStr);
 
@@ -183,9 +195,9 @@ export async function GET(req) {
   } catch (err) {
     console.error("API /api/db GET error:", err);
     return NextResponse.json({
-      error: err.message,
+      error: err.message || "Failed to query database",
       suggestion: getSupabaseSuggestion(err, connStr),
-    }, { status: 500 });
+    }, { status: 400 });
   } finally {
     if (pool) {
       await pool.end().catch(() => {});
@@ -196,11 +208,13 @@ export async function GET(req) {
 // POST: Save, sync records, or initialize table in Supabase
 export async function POST(req) {
   let pool = null;
+  let connStr = "";
+
   try {
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const { records = [], connectionString = "", action = "" } = body;
     const headerConn = req.headers.get("x-database-url") || "";
-    const connStr = connectionString || headerConn;
+    connStr = (connectionString || headerConn).trim();
 
     pool = getPool(connStr);
 
@@ -313,9 +327,9 @@ export async function POST(req) {
   } catch (err) {
     console.error("API /api/db POST error:", err);
     return NextResponse.json({
-      error: err.message,
+      error: err.message || "Failed to sync to database",
       suggestion: getSupabaseSuggestion(err, connStr),
-    }, { status: 500 });
+    }, { status: 400 });
   } finally {
     if (pool) {
       await pool.end().catch(() => {});
