@@ -197,10 +197,12 @@ export default function EnterpriseEmailDashboard() {
 
   // SMTP Settings
   const [smtpSettings, setSmtpSettings] = useState({
-    host: "smtp.gmail.com",
+    host: "smtp-relay.brevo.com",
     port: "587",
     user: "",
     pass: "",
+    senderEmail: "",
+    senderName: "CloudMail Team",
   });
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState(null);
@@ -391,6 +393,10 @@ export default function EnterpriseEmailDashboard() {
   };
 
   const syncToCloudDb = async () => {
+    if (customDbUrl.includes("db.") && customDbUrl.includes(".supabase.co")) {
+      notify("Direct host 'db.*' is IPv6-only. Switch to Connection Pooler URI (port 6543) in Settings.", "error");
+      return;
+    }
     setIsSyncingDb(true);
     try {
       const headers = { "Content-Type": "application/json" };
@@ -420,6 +426,10 @@ export default function EnterpriseEmailDashboard() {
   };
 
   const loadFromCloudDb = async () => {
+    if (customDbUrl.includes("db.") && customDbUrl.includes(".supabase.co")) {
+      notify("Direct host 'db.*' is IPv6-only. Switch to Connection Pooler URI (port 6543) in Settings.", "error");
+      return;
+    }
     setIsSyncingDb(true);
     try {
       const headers = {};
@@ -845,8 +855,8 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
           records: targetRecords,
           provider,
           resendApiKey: resendKey,
-          fromEmail: provider === "mailchimp" ? mailchimpFromEmail : resendFromEmail,
-          fromName: provider === "mailchimp" ? mailchimpFromName : "Dispatch Team",
+          fromEmail: provider === "mailchimp" ? mailchimpFromEmail : (provider === "smtp" ? (smtpSettings.senderEmail || smtpSettings.user) : resendFromEmail),
+          fromName: provider === "mailchimp" ? mailchimpFromName : (provider === "smtp" ? (smtpSettings.senderName || "CloudMail Dispatcher") : "Dispatch Team"),
           mailchimpApiKey,
           smtpConfig: provider === "smtp" ? smtpSettings : null,
           useCommonBody,
@@ -2276,6 +2286,39 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-[#dadce0]">
+                  <div>
+                    <label className="block text-[#202124] font-medium mb-1">
+                      Sender Email (From Address)
+                    </label>
+                    <input
+                      type="email"
+                      value={smtpSettings.senderEmail || ""}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, senderEmail: e.target.value.trim() })}
+                      placeholder="velavanvelavan790@gmail.com"
+                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
+                    />
+                    <p className="text-[10px] text-[#5f6368] mt-0.5">
+                      Must match verified Brevo sender to reach Inbox directly.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-[#202124] font-medium mb-1">
+                      Sender Name
+                    </label>
+                    <input
+                      type="text"
+                      value={smtpSettings.senderName || ""}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, senderName: e.target.value })}
+                      placeholder="CloudMail Team"
+                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
+                    />
+                    <p className="text-[10px] text-[#5f6368] mt-0.5">
+                      Display name shown to recipient.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="pt-1 flex items-center justify-between">
                   <button
                     type="button"
@@ -2406,6 +2449,27 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                   </button>
                 )}
               </div>
+
+              {/* Instant IPv6 Direct Host Warning */}
+              {customDbUrl.includes("db.") && customDbUrl.includes(".supabase.co") && (
+                <div className="p-3 bg-[#fef7e0] border border-[#f9ab00] rounded-md text-xs text-[#202124] space-y-1.5">
+                  <p className="font-semibold text-[#b06000] flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-[#e37400] shrink-0" />
+                    <span>Direct Supabase Host Detected (db.[ref].supabase.co)</span>
+                  </p>
+                  <p className="text-[11px] text-[#5f6368] leading-relaxed">
+                    Direct Supabase connections are <strong>IPv6-only</strong> and fail on Vercel with <code>getaddrinfo ENOTFOUND</code>.
+                  </p>
+                  <div className="text-[11px] bg-white p-2.5 rounded border border-[#f9ab00]/30 font-sans space-y-1 text-[#202124]">
+                    <div className="font-medium text-[#1a73e8]">How to fix in 10 seconds:</div>
+                    <ol className="list-decimal pl-4 space-y-0.5 text-[#5f6368]">
+                      <li>Open Supabase Dashboard &rarr; <strong>Project Settings (⚙️)</strong> &rarr; <strong>Database</strong>.</li>
+                      <li>Scroll to <strong>Connection string</strong> &rarr; switch Method to <strong>Connection pooling</strong>.</li>
+                      <li>Copy the Pooler URI (starts with <code className="text-[#202124] bg-[#f1f3f4] px-1 py-0.5 rounded">postgresql://postgres.[ref]:...pooler.supabase.com:6543</code>) and paste it here.</li>
+                    </ol>
+                  </div>
+                </div>
+              )}
 
               {/* Status Alert Banner */}
               {dbConnectionStatus && (

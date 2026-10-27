@@ -220,6 +220,8 @@ export async function POST(req) {
       const portClean = parseInt((smtpConfig.port || "587").toString().trim(), 10);
       const userClean = (smtpConfig.user || "").trim();
       const passClean = (smtpConfig.pass || "").trim();
+      const senderEmail = (smtpConfig.senderEmail || smtpConfig.fromEmail || fromEmail || userClean).trim();
+      const senderDisplayName = (smtpConfig.senderName || smtpConfig.fromName || fromName || "CloudMail Dispatcher").trim();
 
       const transporter = nodemailer.createTransport({
         host: hostClean,
@@ -237,7 +239,7 @@ export async function POST(req) {
           const emailContent = useCommonBody && commonBodyTemplate ? interpolate(commonBodyTemplate, record) : record.message;
 
           const mailOptions = {
-            from: `"${fromName}" <${userClean}>`,
+            from: `"${senderDisplayName}" <${senderEmail}>`,
             to: record.recipient_email,
             subject: subject,
             text: emailContent,
