@@ -59,12 +59,19 @@ function getPool(customConnStr = "") {
   const conn = (customConnStr || process.env.DATABASE_URL || "").trim();
   if (!conn) return null;
 
+  // Direct Supabase host check: db.[ref].supabase.co is IPv6-only and cannot be reached from Vercel
+  if (conn.includes("db.") && conn.includes(".supabase.co")) {
+    const error = new Error("Direct Supabase host 'db.[ref].supabase.co' is IPv6-only and cannot be reached from Vercel serverless. Please switch to the Supabase Connection Pooler URI (aws-0-[region].pooler.supabase.com:6543 or 5432) in Supabase Project Settings -> Database.");
+    error.code = "SUPABASE_IPV6_DIRECT_NOT_SUPPORTED";
+    throw error;
+  }
+
   return new Pool({
     connectionString: conn,
     ssl: {
       rejectUnauthorized: false,
     },
-    connectionTimeoutMillis: 10000,
+    connectionTimeoutMillis: 4000,
   });
 }
 

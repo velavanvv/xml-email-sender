@@ -293,6 +293,24 @@ export default function EnterpriseEmailDashboard() {
     setTimeout(() => setSqlCopied(false), 2500);
   };
 
+  const parseApiResponse = async (res) => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (res.status === 504 || text.toLowerCase().includes("gateway timeout")) {
+        return {
+          error: "Database Connection Timeout (504)",
+          suggestion: "Your connection string is using direct IPv6 (db.[ref].supabase.co), which times out on Vercel. Please switch to the Supabase Connection Pooler URI (aws-0-[region].pooler.supabase.com:6543) in Settings -> Database.",
+        };
+      }
+      return {
+        error: `Server returned status ${res.status}: ${text.slice(0, 160) || "Empty response"}`,
+        suggestion: "Ensure your Supabase connection string is valid and uses Connection Pooling (port 6543 or 5432).",
+      };
+    }
+  };
+
   const handleInitSupabaseTable = async () => {
     if (!customDbUrl.trim()) {
       alert("Please paste your Supabase connection string first (from Project Settings -> Database).");
@@ -312,7 +330,7 @@ export default function EnterpriseEmailDashboard() {
           connectionString: customDbUrl.trim(),
         }),
       });
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (res.ok && data.success) {
         setDbConnectionStatus({
           success: true,
@@ -356,12 +374,12 @@ export default function EnterpriseEmailDashboard() {
           connectionString: customDbUrl.trim() || undefined,
         }),
       });
-      const data = await res.json();
-      if (res.ok) {
+      const data = await parseApiResponse(res);
+      if (res.ok && data.success) {
         setLastSyncedTime(new Date().toLocaleTimeString());
         alert(`✅ Cloud DB Synchronized! ${data.count} records saved to ${data.host || "cloud storage"}.`);
       } else {
-        alert("Sync error: " + data.error + (data.suggestion ? `\n\n${data.suggestion}` : ""));
+        alert("Sync error: " + (data.error || "Unknown error") + (data.suggestion ? `\n\n${data.suggestion}` : ""));
       }
     } catch (err) {
       alert("Cloud DB sync failed: " + err.message);
@@ -380,13 +398,13 @@ export default function EnterpriseEmailDashboard() {
         url = `/api/db?connectionString=${encodeURIComponent(customDbUrl.trim())}`;
       }
       const res = await fetch(url, { headers });
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (res.ok && data.records) {
         setRecords(data.records);
         setLastSyncedTime(new Date().toLocaleTimeString());
         alert(`✅ Loaded ${data.records.length} records from ${data.host || "Cloud DB"}!`);
       } else {
-        alert("Load error: " + data.error + (data.suggestion ? `\n\n${data.suggestion}` : ""));
+        alert("Load error: " + (data.error || "Could not read records") + (data.suggestion ? `\n\n${data.suggestion}` : ""));
       }
     } catch (err) {
       alert("Failed to load from Cloud DB: " + err.message);
@@ -2200,6 +2218,22 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                   <RefreshCw className={`w-3.5 h-3.5 ${isCreatingTable ? "animate-spin" : ""}`} />
                   <span>{isCreatingTable ? "Connecting..." : "⚡ Auto-Create Table in Supabase"}</span>
                 </button>
+                {customDbUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSaveDbUrl("");
+                      setDbConnectionStatus(null);
+                      setCloudDbStatus("Connected (Free Demo Host)");
+                      alert("Custom database URL cleared. Reset to Free Demo Cloud Host.");
+                    }}
+                    className="px-2.5 py-2 bg-white hover:bg-[#f1f3f4] text-[#d93025] border border-[#dadce0] rounded text-xs font-medium inline-flex items-center justify-center gap-1 whitespace-nowrap transition-colors"
+                    title="Clear database URL and revert to demo storage"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Clear</span>
+                  </button>
+                )}
               </div>
 
               {/* Status Alert Banner */}
