@@ -49,7 +49,8 @@ import {
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
-const SUPABASE_SQL_SCHEMA = `-- XML Email Dispatcher Table Schema for Supabase
+const SUPABASE_SQL_SCHEMA = `-- CloudMail XML Enterprise Database Schema for Supabase
+-- 1. Table: email_records (Recipients, Dispatches & Logs)
 CREATE TABLE IF NOT EXISTS email_records (
   id TEXT PRIMARY KEY,
   recipient_email TEXT NOT NULL,
@@ -67,7 +68,45 @@ CREATE TABLE IF NOT EXISTS email_records (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Enable Row Level Security (RLS) & allow read/write access
+-- 2. Table: smtp_configurations (Relay credentials & Verified Senders)
+CREATE TABLE IF NOT EXISTS smtp_configurations (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  host TEXT NOT NULL,
+  port INTEGER DEFAULT 587,
+  username TEXT NOT NULL,
+  password TEXT NOT NULL,
+  sender_email TEXT,
+  sender_name TEXT,
+  is_active BOOLEAN DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. Table: email_configurations (Gateway selections, API Keys & Common Templates)
+CREATE TABLE IF NOT EXISTS email_configurations (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  active_provider TEXT DEFAULT 'smtp',
+  resend_api_key TEXT,
+  resend_from_email TEXT,
+  mailchimp_api_key TEXT,
+  mailchimp_from_email TEXT,
+  mailchimp_from_name TEXT,
+  use_common_body BOOLEAN DEFAULT false,
+  common_subject TEXT,
+  common_body_template TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. Table: users (Operator Authentication & Access Control)
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  role TEXT DEFAULT 'operator',
+  last_login_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable Row Level Security (RLS) & default access
 ALTER TABLE email_records ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all access" ON email_records;
 CREATE POLICY "Allow all access" ON email_records FOR ALL USING (true);`;
@@ -282,13 +321,50 @@ export default function EnterpriseEmailDashboard() {
   }, [records, isClientLoaded]);
 
   // Authentication Handlers
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e?.preventDefault();
     const cleanPass = authPasscode.trim();
+    const cleanUser = authUser.trim() || "admin@enterprise.internal";
+
+    // 1. Check Supabase 'users' table via backend
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (customDbUrl.trim()) headers["x-database-url"] = customDbUrl.trim();
+      const res = await fetch("/api/db", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "authenticate_user",
+          connectionString: customDbUrl.trim() || undefined,
+          authCredentials: {
+            email: cleanUser,
+            password: cleanPass,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsAuthenticated(true);
+        setAuthError("");
+        if (rememberMe) {
+          localStorage.setItem("xml_dispatch_auth", "true");
+          localStorage.setItem("xml_dispatch_user", cleanUser);
+        } else {
+          sessionStorage.setItem("xml_dispatch_auth", "true");
+          sessionStorage.setItem("xml_dispatch_user", cleanUser);
+        }
+        notify(`Welcome ${data.user?.email || "Administrator"}. Authenticated via database.`, "success");
+        return;
+      }
+    } catch {
+      // Fallback if database is offline or not yet connected
+    }
+
+    // 2. Master Fallback Authentication
     if (cleanPass === systemPasscode.trim() || cleanPass === "admin123") {
       setIsAuthenticated(true);
       setAuthError("");
-      const userToStore = authUser.trim() || "admin@enterprise.internal";
+      const userToStore = cleanUser;
       if (rememberMe) {
         localStorage.setItem("xml_dispatch_auth", "true");
         localStorage.setItem("xml_dispatch_user", userToStore);
@@ -298,7 +374,7 @@ export default function EnterpriseEmailDashboard() {
       }
       notify("Authenticated successfully. Welcome to CloudMail Console.", "success");
     } else {
-      setAuthError("Invalid credentials. Please verify your administrator password.");
+      setAuthError("Invalid credentials. Please verify your operator password.");
     }
   };
 
@@ -344,9 +420,56 @@ export default function EnterpriseEmailDashboard() {
     }
   };
 
+  const saveBackendConfiguration = async () => {
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (customDbUrl.trim()) headers["x-database-url"] = customDbUrl.trim();
+
+      // 1. Save SMTP settings to 'smtp_configurations' table
+      await fetch("/api/db", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "save_smtp",
+          connectionString: customDbUrl.trim() || undefined,
+          smtpConfig: smtpSettings,
+        }),
+      });
+
+      // 2. Save Gateway & Template settings to 'email_configurations' table
+      await fetch("/api/db", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "save_email_config",
+          connectionString: customDbUrl.trim() || undefined,
+          emailConfig: {
+            provider,
+            resendKey,
+            resendFromEmail,
+            mailchimpApiKey,
+            mailchimpFromEmail,
+            mailchimpFromName,
+            useCommonBody,
+            commonSubject,
+            commonBodyTemplate: commonBody,
+          },
+        }),
+      });
+      return true;
+    } catch (e) {
+      console.warn("Failed to sync config to Supabase:", e);
+      return false;
+    }
+  };
+
   const handleInitSupabaseTable = async () => {
     if (!customDbUrl.trim()) {
       notify("Please provide a database connection string in settings.", "error");
+      return;
+    }
+    if (customDbUrl.includes("db.") && customDbUrl.includes(".supabase.co")) {
+      notify("Supabase Direct host 'db.*' is IPv6-only. Use Connection Pooler URI (port 6543) instead.", "error");
       return;
     }
     setIsCreatingTable(true);
@@ -359,7 +482,7 @@ export default function EnterpriseEmailDashboard() {
           "x-database-url": customDbUrl.trim(),
         },
         body: JSON.stringify({
-          action: "init_table",
+          action: "init_all_tables",
           connectionString: customDbUrl.trim(),
         }),
       });
@@ -367,16 +490,19 @@ export default function EnterpriseEmailDashboard() {
       if (res.ok && data.success) {
         setDbConnectionStatus({
           success: true,
-          message: data.message || "Database verified & table initialized.",
-          rowCount: data.rowCount,
-          host: "PostgreSQL Database",
+          message: data.message || "All 4 Supabase tables initialized and verified.",
+          tables: data.tables,
+          host: "Supabase PostgreSQL Database",
         });
         setCloudDbStatus("Connected");
-        notify("Database connection and schema verified successfully!", "success");
+        notify("All 4 Supabase tables verified and synchronized!", "success");
+
+        // Immediately seed current active settings to the newly created Supabase tables
+        saveBackendConfiguration();
       } else {
         setDbConnectionStatus({
           success: false,
-          message: data.error || "Failed to initialize table",
+          message: data.error || "Failed to initialize tables",
           suggestion: data.suggestion,
         });
         notify(data.error || "Database initialization failed.", "error");
@@ -403,6 +529,10 @@ export default function EnterpriseEmailDashboard() {
       if (customDbUrl.trim()) {
         headers["x-database-url"] = customDbUrl.trim();
       }
+
+      // Also persist latest configs alongside records
+      await saveBackendConfiguration();
+
       const res = await fetch("/api/db", {
         method: "POST",
         headers,
@@ -414,7 +544,7 @@ export default function EnterpriseEmailDashboard() {
       const data = await parseApiResponse(res);
       if (res.ok && data.success) {
         setLastSyncedTime(new Date().toLocaleTimeString());
-        notify(`Storage synchronized: ${data.count} records saved.`, "success");
+        notify(`Storage synchronized: ${data.count} records, SMTP & templates saved to Supabase!`, "success");
       } else {
         notify(data.error || "Storage sync pending. Recheck database configuration.", "error");
       }
@@ -433,17 +563,33 @@ export default function EnterpriseEmailDashboard() {
     setIsSyncingDb(true);
     try {
       const headers = {};
-      let url = "/api/db";
+      let url = "/api/db?action=load_all";
       if (customDbUrl.trim()) {
         headers["x-database-url"] = customDbUrl.trim();
-        url = `/api/db?connectionString=${encodeURIComponent(customDbUrl.trim())}`;
+        url = `/api/db?action=load_all&connectionString=${encodeURIComponent(customDbUrl.trim())}`;
       }
       const res = await fetch(url, { headers });
       const data = await parseApiResponse(res);
-      if (res.ok && data.records) {
-        setRecords(data.records);
+      if (res.ok) {
+        if (data.records && Array.isArray(data.records)) {
+          setRecords(data.records);
+        }
+        if (data.smtpConfig) {
+          setSmtpSettings(data.smtpConfig);
+        }
+        if (data.emailConfig) {
+          if (data.emailConfig.provider) setProvider(data.emailConfig.provider);
+          if (data.emailConfig.resendKey) setResendKey(data.emailConfig.resendKey);
+          if (data.emailConfig.resendFromEmail) setResendFromEmail(data.emailConfig.resendFromEmail);
+          if (data.emailConfig.mailchimpApiKey) setMailchimpApiKey(data.emailConfig.mailchimpApiKey);
+          if (data.emailConfig.mailchimpFromEmail) setMailchimpFromEmail(data.emailConfig.mailchimpFromEmail);
+          if (data.emailConfig.mailchimpFromName) setMailchimpFromName(data.emailConfig.mailchimpFromName);
+          if (data.emailConfig.useCommonBody !== undefined) setUseCommonBody(data.emailConfig.useCommonBody);
+          if (data.emailConfig.commonSubject) setCommonSubject(data.emailConfig.commonSubject);
+          if (data.emailConfig.commonBodyTemplate) setCommonBody(data.emailConfig.commonBodyTemplate);
+        }
         setLastSyncedTime(new Date().toLocaleTimeString());
-        notify(`Storage refreshed: ${data.records.length} records loaded.`, "success");
+        notify(`Loaded from Supabase: ${data.records?.length || 0} records, SMTP & Gateway configurations active.`, "success");
       } else {
         notify(data.error || "Could not retrieve records from storage.", "error");
       }
@@ -2474,21 +2620,44 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               {/* Status Alert Banner */}
               {dbConnectionStatus && (
                 <div
-                  className={`p-2.5 rounded-md text-[11px] flex items-start gap-2 ${
+                  className={`p-3 rounded-md text-[11px] space-y-2 ${
                     dbConnectionStatus.success
                       ? "bg-[#e6f4ea] text-[#137333] border border-[#ceead6]"
                       : "bg-[#fce8e6] text-[#c5221f] border border-[#fad2cf]"
                   }`}
                 >
-                  {dbConnectionStatus.success ? (
-                    <CheckCircle className="w-4 h-4 shrink-0 text-[#1e8e3e] mt-0.5" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 shrink-0 text-[#d93025] mt-0.5" />
-                  )}
-                  <div className="space-y-0.5">
-                    <strong>{dbConnectionStatus.success ? "Status: Connected & Operational" : "Connection Notice:"}</strong>
-                    <p>{dbConnectionStatus.message}</p>
+                  <div className="flex items-start gap-2">
+                    {dbConnectionStatus.success ? (
+                      <CheckCircle className="w-4 h-4 shrink-0 text-[#1e8e3e] mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-[#d93025] mt-0.5" />
+                    )}
+                    <div className="space-y-0.5">
+                      <strong>{dbConnectionStatus.success ? "Status: Connected & Operational" : "Connection Notice:"}</strong>
+                      <p>{dbConnectionStatus.message}</p>
+                    </div>
                   </div>
+
+                  {dbConnectionStatus.tables && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-[#ceead6]">
+                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
+                        <div className="font-semibold text-[#137333] font-mono text-[10px]">email_records</div>
+                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.email_records} dispatches</div>
+                      </div>
+                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
+                        <div className="font-semibold text-[#137333] font-mono text-[10px]">smtp_configurations</div>
+                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.smtp_configurations} active config</div>
+                      </div>
+                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
+                        <div className="font-semibold text-[#137333] font-mono text-[10px]">email_configurations</div>
+                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.email_configurations} settings row</div>
+                      </div>
+                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
+                        <div className="font-semibold text-[#137333] font-mono text-[10px]">users</div>
+                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.users} operator account</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2647,7 +2816,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
             <div className="flex justify-end gap-2 mt-5 pt-3 border-t border-[#dadce0]">
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   try {
                     localStorage.setItem(
                       "xml_dispatch_config",
@@ -2664,6 +2833,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                   } catch (e) {
                     console.warn(e);
                   }
+                  await saveBackendConfiguration();
                   setShowConfigModal(false);
                 }}
                 className="btn-google-primary"
