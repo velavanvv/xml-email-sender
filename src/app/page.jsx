@@ -202,6 +202,8 @@ export default function EnterpriseEmailDashboard() {
     user: "",
     pass: "",
   });
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState(null);
 
   // Manual Add / Edit Modal
   const [showModal, setShowModal] = useState(false);
@@ -439,6 +441,43 @@ export default function EnterpriseEmailDashboard() {
       notify("Failed to load records from storage.", "error");
     } finally {
       setIsSyncingDb(false);
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    if (!smtpSettings.host || !smtpSettings.user || !smtpSettings.pass) {
+      notify("Please fill in Host, Port, Username and Password.", "error");
+      return;
+    }
+    setIsTestingSmtp(true);
+    setSmtpTestResult(null);
+    try {
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "test_smtp",
+          smtpConfig: {
+            host: smtpSettings.host.trim(),
+            port: smtpSettings.port.trim(),
+            user: smtpSettings.user.trim(),
+            pass: smtpSettings.pass.trim(),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSmtpTestResult({ success: true, message: data.message });
+        notify("SMTP connection verified successfully!", "success");
+      } else {
+        setSmtpTestResult({ success: false, message: data.error, suggestion: data.suggestion });
+        notify(data.error || "SMTP authentication failed", "error");
+      }
+    } catch (err) {
+      setSmtpTestResult({ success: false, message: err.message });
+      notify("SMTP connection failed: " + err.message, "error");
+    } finally {
+      setIsTestingSmtp(false);
     }
   };
 
@@ -2189,8 +2228,8 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                     <input
                       type="text"
                       value={smtpSettings.host}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, host: e.target.value })}
-                      placeholder="smtp.gmail.com"
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, host: e.target.value.trim() })}
+                      placeholder="smtp-relay.brevo.com"
                       className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
                     />
                   </div>
@@ -2199,7 +2238,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                     <input
                       type="text"
                       value={smtpSettings.port}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, port: e.target.value })}
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, port: e.target.value.trim() })}
                       placeholder="587"
                       className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
                     />
@@ -2207,25 +2246,25 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 </div>
 
                 <div>
-                  <label className="block text-[#202124] font-medium mb-1">SMTP Username / Email</label>
+                  <label className="block text-[#202124] font-medium mb-1">SMTP Username / Login</label>
                   <input
                     type="text"
                     value={smtpSettings.user}
-                    onChange={(e) => setSmtpSettings({ ...smtpSettings, user: e.target.value })}
-                    placeholder="your-email@gmail.com"
+                    onChange={(e) => setSmtpSettings({ ...smtpSettings, user: e.target.value.trim() })}
+                    placeholder="c03022001@smtp-brevo.com"
                     className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[#202124] font-medium mb-1">SMTP Password / App Password</label>
+                  <label className="block text-[#202124] font-medium mb-1">SMTP Key / Password</label>
                   <div className="relative">
                     <input
                       type={showSmtpPass ? "text" : "password"}
                       value={smtpSettings.pass}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, pass: e.target.value })}
-                      placeholder="••••••••••••"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124] pr-9"
+                      onChange={(e) => setSmtpSettings({ ...smtpSettings, pass: e.target.value.trim() })}
+                      placeholder="xsmtpsib-••••••••••••••••"
+                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124] pr-9 font-mono"
                     />
                     <button
                       type="button"
@@ -2236,6 +2275,45 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                     </button>
                   </div>
                 </div>
+
+                <div className="pt-1 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={handleTestSmtp}
+                    disabled={isTestingSmtp || !smtpSettings.user || !smtpSettings.pass}
+                    className="px-3.5 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] disabled:opacity-50 text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingSmtp ? "animate-spin" : ""}`} />
+                    <span>{isTestingSmtp ? "Testing Relay..." : "⚡ Test SMTP Connection"}</span>
+                  </button>
+
+                  <span className="text-[11px] text-[#5f6368]">
+                    Brevo / Gmail / Custom Relay
+                  </span>
+                </div>
+
+                {/* SMTP Test Feedback Banner */}
+                {smtpTestResult && (
+                  <div
+                    className={`p-2.5 rounded-md text-[11px] flex items-start gap-2 ${
+                      smtpTestResult.success
+                        ? "bg-[#e6f4ea] text-[#137333] border border-[#ceead6]"
+                        : "bg-[#fce8e6] text-[#c5221f] border border-[#fad2cf]"
+                    }`}
+                  >
+                    {smtpTestResult.success ? (
+                      <CheckCircle className="w-4 h-4 shrink-0 text-[#1e8e3e] mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-[#d93025] mt-0.5" />
+                    )}
+                    <div className="space-y-0.5">
+                      <p className="font-semibold">{smtpTestResult.message}</p>
+                      {smtpTestResult.suggestion && (
+                        <p className="text-[10px] text-[#5f6368]">{smtpTestResult.suggestion}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </>

@@ -43,6 +43,42 @@ function prepareAttachments(record, commonAttachment) {
 export async function POST(req) {
   try {
     const body = await req.json();
+
+    // Instant SMTP verification test
+    if (body.action === "test_smtp") {
+      const { smtpConfig } = body;
+      if (!smtpConfig || !smtpConfig.host || !smtpConfig.user || !smtpConfig.pass) {
+        return NextResponse.json({ error: "Please provide SMTP Host, Port, Username and Password." }, { status: 400 });
+      }
+      const hostClean = (smtpConfig.host || "").trim();
+      const portClean = parseInt((smtpConfig.port || "587").toString().trim(), 10);
+      const userClean = (smtpConfig.user || "").trim();
+      const passClean = (smtpConfig.pass || "").trim();
+
+      const transporter = nodemailer.createTransport({
+        host: hostClean,
+        port: portClean,
+        secure: portClean === 465,
+        auth: {
+          user: userClean,
+          pass: passClean,
+        },
+      });
+
+      try {
+        await transporter.verify();
+        return NextResponse.json({
+          success: true,
+          message: "✅ SMTP connection verified! Relay is ready to dispatch emails.",
+        });
+      } catch (err) {
+        return NextResponse.json({
+          error: "Authentication failed: " + err.message,
+          suggestion: "Check your Brevo/Gmail credentials. Ensure you are using the generated SMTP key, not your account login password.",
+        }, { status: 400 });
+      }
+    }
+
     const {
       records = [],
       provider = "simulation", // "simulation", "resend", "smtp", "mailchimp"
