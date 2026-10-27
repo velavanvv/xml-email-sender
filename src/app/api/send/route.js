@@ -180,13 +180,18 @@ export async function POST(req) {
         return NextResponse.json({ error: "Incomplete SMTP configuration." }, { status: 400 });
       }
 
+      const hostClean = (smtpConfig.host || "").trim();
+      const portClean = parseInt((smtpConfig.port || "587").toString().trim(), 10);
+      const userClean = (smtpConfig.user || "").trim();
+      const passClean = (smtpConfig.pass || "").trim();
+
       const transporter = nodemailer.createTransport({
-        host: smtpConfig.host,
-        port: parseInt(smtpConfig.port || "587", 10),
-        secure: smtpConfig.port === "465",
+        host: hostClean,
+        port: portClean,
+        secure: portClean === 465,
         auth: {
-          user: smtpConfig.user,
-          pass: smtpConfig.pass,
+          user: userClean,
+          pass: passClean,
         },
       });
 
@@ -196,7 +201,7 @@ export async function POST(req) {
           const emailContent = useCommonBody && commonBodyTemplate ? interpolate(commonBodyTemplate, record) : record.message;
 
           const mailOptions = {
-            from: `"${fromName}" <${smtpConfig.user}>`,
+            from: `"${fromName}" <${userClean}>`,
             to: record.recipient_email,
             subject: subject,
             text: emailContent,
