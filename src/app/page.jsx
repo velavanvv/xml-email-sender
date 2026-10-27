@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS email_records (
 
 -- Enable Row Level Security (RLS) & allow read/write access
 ALTER TABLE email_records ENABLE ROW LEVEL SECURITY;
-CREATE POLICY IF NOT EXISTS "Allow all access" ON email_records FOR ALL USING (true);`;
+DROP POLICY IF EXISTS "Allow all access" ON email_records;
+CREATE POLICY "Allow all access" ON email_records FOR ALL USING (true);`;
 
 const DEFAULT_DEMO_RECORDS = [
   {
