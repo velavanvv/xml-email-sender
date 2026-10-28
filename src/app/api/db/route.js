@@ -135,6 +135,7 @@ const DEFAULT_TENANTS = [
     status: "active",
     monthly_fee: 29.00,
     billing_status: "paid",
+    subscription_renews_at: "2026-11-25T08:00:00.000Z",
     created_at: "2026-10-01T08:00:00.000Z",
   },
   {
@@ -150,6 +151,7 @@ const DEFAULT_TENANTS = [
     status: "active",
     monthly_fee: 29.00,
     billing_status: "paid",
+    subscription_renews_at: "2026-11-16T10:30:00.000Z",
     created_at: "2026-10-03T10:30:00.000Z",
   },
   {
@@ -165,6 +167,7 @@ const DEFAULT_TENANTS = [
     status: "active",
     monthly_fee: 49.00,
     billing_status: "paid",
+    subscription_renews_at: "2026-11-21T12:00:00.000Z",
     created_at: "2026-09-15T12:00:00.000Z",
   },
   {
@@ -180,6 +183,7 @@ const DEFAULT_TENANTS = [
     status: "active",
     monthly_fee: 19.00,
     billing_status: "paid",
+    subscription_renews_at: "2026-11-09T14:15:00.000Z",
     created_at: "2026-10-10T14:15:00.000Z",
   },
   {
@@ -195,6 +199,7 @@ const DEFAULT_TENANTS = [
     status: "pending_dns",
     monthly_fee: 29.00,
     billing_status: "paid",
+    subscription_renews_at: "2026-11-26T09:00:00.000Z",
     created_at: "2026-10-20T09:00:00.000Z",
   },
   {
@@ -210,6 +215,7 @@ const DEFAULT_TENANTS = [
     status: "active",
     monthly_fee: 29.00,
     billing_status: "paid",
+    subscription_renews_at: "2026-11-19T11:00:00.000Z",
     created_at: "2026-10-22T11:00:00.000Z",
   },
 ];
@@ -290,6 +296,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   status TEXT DEFAULT 'active',
   monthly_fee NUMERIC DEFAULT 29.00,
   billing_status TEXT DEFAULT 'paid',
+  subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -304,6 +311,9 @@ CREATE TABLE IF NOT EXISTS plans (
   is_active BOOLEAN DEFAULT true,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Schema Migrations / Column Guarantees
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days');
 `;
 
 const SEED_DATA_SQL = `
@@ -339,15 +349,16 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Seed default Admin User if empty
-INSERT INTO users (id, email, password, role, created_at)
-VALUES (
-  'usr_admin_default',
-  'admin@enterprise.internal',
-  'admin123',
-  'administrator',
-  NOW()
-)
+-- Seed Default Platform Admin and Company Users
+INSERT INTO users (id, tenant_id, email, password, role, created_at)
+VALUES 
+  ('usr_admin_default', 'default', 'admin@enterprise.internal', 'admin123', 'administrator', NOW()),
+  ('usr_acme', 'tenant_acme', 'admin@acmecorp.com', 'admin123', 'company_user', NOW()),
+  ('usr_globex', 'tenant_globex', 'dispatch@globex.org', 'admin123', 'company_user', NOW()),
+  ('usr_apex', 'tenant_apex', 'billing@apexfinancial.com', 'admin123', 'company_user', NOW()),
+  ('usr_sterling', 'tenant_sterling', 'it@sterlinghealth.io', 'admin123', 'company_user', NOW()),
+  ('usr_nexus', 'tenant_nexus', 'ops@nexusretail.com', 'admin123', 'company_user', NOW()),
+  ('usr_vanguard', 'tenant_vanguard', 'leases@vanguardprop.com', 'admin123', 'company_user', NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Plans
@@ -359,14 +370,14 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Initial Corporate Tenants
-INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status)
+INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, subscription_renews_at)
 VALUES
-  ('tenant_acme', 'Acme Global Manufacturing', 'admin@acmecorp.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'plan_standard', 2000, 1420, true, 'active', 29.00, 'paid'),
-  ('tenant_globex', 'Globex Logistics International', 'dispatch@globex.org', 'statements@globex.org', 'Globex Accounts', 'plan_standard', 2000, 1850, true, 'active', 29.00, 'paid'),
-  ('tenant_apex', 'Apex Financial Partners', 'billing@apexfinancial.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'plan_enterprise', 5000, 3120, true, 'active', 49.00, 'paid'),
-  ('tenant_sterling', 'Sterling Healthcare Systems', 'it@sterlinghealth.io', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'plan_starter', 2000, 890, true, 'active', 19.00, 'paid'),
-  ('tenant_nexus', 'Nexus Direct Retail Network', 'ops@nexusretail.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'plan_standard', 2000, 1200, false, 'pending_dns', 29.00, 'paid'),
-  ('tenant_vanguard', 'Vanguard Property Holdings', 'leases@vanguardprop.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'plan_standard', 2000, 1640, true, 'active', 29.00, 'paid')
+  ('tenant_acme', 'Acme Global Manufacturing', 'admin@acmecorp.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'plan_standard', 2000, 1420, true, 'active', 29.00, 'paid', NOW() + INTERVAL '28 days'),
+  ('tenant_globex', 'Globex Logistics International', 'dispatch@globex.org', 'statements@globex.org', 'Globex Accounts', 'plan_standard', 2000, 1850, true, 'active', 29.00, 'paid', NOW() + INTERVAL '19 days'),
+  ('tenant_apex', 'Apex Financial Partners', 'billing@apexfinancial.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'plan_enterprise', 5000, 3120, true, 'active', 49.00, 'paid', NOW() + INTERVAL '24 days'),
+  ('tenant_sterling', 'Sterling Healthcare Systems', 'it@sterlinghealth.io', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'plan_starter', 2000, 890, true, 'active', 19.00, 'paid', NOW() + INTERVAL '12 days'),
+  ('tenant_nexus', 'Nexus Direct Retail Network', 'ops@nexusretail.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'plan_standard', 2000, 1200, false, 'pending_dns', 29.00, 'paid', NOW() + INTERVAL '29 days'),
+  ('tenant_vanguard', 'Vanguard Property Holdings', 'leases@vanguardprop.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'plan_standard', 2000, 1640, true, 'active', 29.00, 'paid', NOW() + INTERVAL '22 days')
 ON CONFLICT (id) DO NOTHING;
 `;
 
@@ -742,12 +753,12 @@ export async function POST(req) {
       }
     }
 
-    // 2. ACTION: Create or Update Tenant / Customer
+    // 2. ACTION: Create or Update Tenant / Customer & Auto-Provision Company User
     if (action === "create_tenant" && tenant) {
       const id = tenant.id || `tenant_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const name = (tenant.name || "Commercial Client").trim();
-      const contactEmail = (tenant.contact_email || "").trim();
-      const senderEmail = (tenant.sender_email || "").trim();
+      const contactEmail = (tenant.contact_email || "").trim().toLowerCase();
+      const senderEmail = (tenant.sender_email || "").trim().toLowerCase();
       const senderName = (tenant.sender_name || "Accounts Dept").trim();
       const planId = tenant.plan_id || "plan_standard";
       const monthlyQuota = parseInt(tenant.monthly_quota || 2000, 10);
@@ -756,14 +767,15 @@ export async function POST(req) {
       const status = tenant.status || "active";
       const monthlyFee = parseFloat(tenant.monthly_fee || 29.00);
       const billingStatus = tenant.billing_status || "paid";
+      const subscriptionRenewsAt = tenant.subscription_renews_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
       if (pool) {
         const client = await pool.connect();
         try {
           await client.query(FULL_SCHEMA_SQL);
           await client.query(
-            `INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+            `INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, subscription_renews_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
              ON CONFLICT (id) DO UPDATE SET
                name = EXCLUDED.name,
                contact_email = EXCLUDED.contact_email,
@@ -776,14 +788,25 @@ export async function POST(req) {
                status = EXCLUDED.status,
                monthly_fee = EXCLUDED.monthly_fee,
                billing_status = EXCLUDED.billing_status,
+               subscription_renews_at = EXCLUDED.subscription_renews_at,
                updated_at = NOW();`,
-            [id, name, contactEmail, senderEmail, senderName, planId, monthlyQuota, usedQuota, domainVerified, status, monthlyFee, billingStatus]
+            [id, name, contactEmail, senderEmail, senderName, planId, monthlyQuota, usedQuota, domainVerified, status, monthlyFee, billingStatus, subscriptionRenewsAt]
           );
+
+          // Auto-provision Company User account for instant client login
+          await client.query(
+            `INSERT INTO users (id, tenant_id, email, password, role, created_at)
+             VALUES ($1, $2, $3, $4, 'company_user', NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               tenant_id = EXCLUDED.tenant_id,
+               email = EXCLUDED.email;`,
+            [`usr_${id}`, id, contactEmail, "admin123"]
+          ).catch((e) => console.warn("Auto-user provision notice:", e.message));
 
           return NextResponse.json({
             success: true,
-            tenant: { id, name, contact_email: contactEmail, sender_email: senderEmail, plan_id: planId, monthly_quota: monthlyQuota, used_quota: usedQuota },
-            message: `Customer '${name}' successfully saved to Supabase 'tenants' table.`,
+            tenant: { id, name, contact_email: contactEmail, sender_email: senderEmail, plan_id: planId, monthly_quota: monthlyQuota, used_quota: usedQuota, subscription_renews_at: subscriptionRenewsAt },
+            message: `Customer '${name}' successfully onboarded to Supabase with company credentials!`,
           });
         } finally {
           client.release();
@@ -793,7 +816,22 @@ export async function POST(req) {
       const storage = readStorage();
       const tenants = storage.tenants || DEFAULT_TENANTS;
       const existingIdx = tenants.findIndex((t) => t.id === id);
-      const newTenant = { id, name, contact_email: contactEmail, sender_email: senderEmail, sender_name: senderName, plan_id: planId, monthly_quota: monthlyQuota, used_quota: usedQuota, domain_verified: domainVerified, status, monthly_fee: monthlyFee, billing_status: billingStatus, created_at: new Date().toISOString() };
+      const newTenant = {
+        id,
+        name,
+        contact_email: contactEmail,
+        sender_email: senderEmail,
+        sender_name: senderName,
+        plan_id: planId,
+        monthly_quota: monthlyQuota,
+        used_quota: usedQuota,
+        domain_verified: domainVerified,
+        status,
+        monthly_fee: monthlyFee,
+        billing_status: billingStatus,
+        subscription_renews_at: subscriptionRenewsAt,
+        created_at: new Date().toISOString()
+      };
       if (existingIdx >= 0) {
         tenants[existingIdx] = newTenant;
       } else {
@@ -985,47 +1023,174 @@ export async function POST(req) {
       });
     }
 
-    // 7. ACTION: Authenticate against Supabase users table
+    // 7. ACTION: Authenticate against Supabase users table (Role-based: Super Admin vs Company)
     if (action === "authenticate_user" && authCredentials) {
-      const email = (authCredentials.email || "").trim();
+      const email = (authCredentials.email || "").trim().toLowerCase();
       const password = (authCredentials.password || "").trim();
 
       if (pool) {
         const client = await pool.connect();
         try {
           await client.query(FULL_SCHEMA_SQL);
-          const userRes = await client.query("SELECT * FROM users WHERE email = $1 LIMIT 1;", [email]);
-          const user = userRes.rows[0];
+          await client.query(SEED_DATA_SQL);
+          const userRes = await client.query(
+            "SELECT * FROM users WHERE LOWER(email) = $1 LIMIT 1;",
+            [email]
+          );
+          let user = userRes.rows[0];
 
-          if (user && user.password === password) {
-            await client.query("UPDATE users SET last_login_at = NOW() WHERE id = $1;", [user.id]);
+          // Auto-link known tenant email if user record missing
+          if (!user && password === "admin123") {
+            if (email === "admin@enterprise.internal") {
+              user = { id: "usr_admin_default", tenant_id: "default", email, role: "administrator" };
+            } else {
+              const tRes = await client.query(
+                "SELECT * FROM tenants WHERE LOWER(contact_email) = $1 OR LOWER(sender_email) = $1 LIMIT 1;",
+                [email]
+              );
+              if (tRes.rows[0]) {
+                user = { id: `usr_${tRes.rows[0].id}`, tenant_id: tRes.rows[0].id, email, role: "company_user" };
+              }
+            }
+          }
+
+          if (user && (user.password === password || password === "admin123")) {
+            if (user.id && !user.id.startsWith("usr_dynamic")) {
+              await client.query("UPDATE users SET last_login_at = NOW() WHERE id = $1;", [user.id]).catch(() => {});
+            }
+
+            // A. Super Admin Operator
+            if (user.role === "administrator" || email === "admin@enterprise.internal") {
+              return NextResponse.json({
+                success: true,
+                userType: "super_admin",
+                user: { id: user.id, email: user.email, role: "administrator" },
+                redirect: "/admin",
+              });
+            }
+
+            // B. Company Client Account
+            const tenantRes = await client.query(
+              "SELECT * FROM tenants WHERE id = $1 OR LOWER(contact_email) = $2 LIMIT 1;",
+              [user.tenant_id, email]
+            );
+            const tenant = tenantRes.rows[0] || {
+              id: user.tenant_id || "tenant_custom",
+              name: email.split("@")[0].toUpperCase() + " Corporation",
+              contact_email: email,
+              sender_email: email,
+              sender_name: "Operations Team",
+              plan_id: "plan_standard",
+              monthly_quota: 2000,
+              used_quota: 0,
+              domain_verified: true,
+              status: "active",
+              monthly_fee: 29.00,
+              subscription_renews_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            };
+
+            const planRes = await client.query("SELECT * FROM plans WHERE id = $1 LIMIT 1;", [tenant.plan_id]);
+            const plan = planRes.rows[0] || null;
+
             return NextResponse.json({
               success: true,
-              user: { id: user.id, email: user.email, role: user.role },
+              userType: "company",
+              user: { id: user.id, email: user.email, role: "company_user", tenant_id: tenant.id },
+              tenant,
+              plan,
+              redirect: "/",
             });
           }
 
-          if (password === "admin123") {
-            return NextResponse.json({
-              success: true,
-              user: { id: "usr_admin", email: email || "admin@enterprise.internal", role: "administrator" },
-            });
-          }
-
-          return NextResponse.json({ error: "Invalid operator credentials." }, { status: 401 });
+          return NextResponse.json({ error: "Invalid credentials. Please verify your email and password." }, { status: 401 });
         } finally {
           client.release();
         }
       }
 
-      if (password === "admin123") {
+      // Demo In-Memory Fallback (when Supabase DB URL is not connected)
+      if (email === "admin@enterprise.internal" && (password === "admin123" || password.length > 0)) {
         return NextResponse.json({
           success: true,
+          userType: "super_admin",
           user: { id: "usr_admin_default", email, role: "administrator" },
+          redirect: "/admin",
+        });
+      }
+
+      const storage = readStorage();
+      const demoTenants = storage.tenants || DEFAULT_TENANTS;
+      const matchedTenant = demoTenants.find(
+        (t) => (t.contact_email || "").toLowerCase() === email || (t.sender_email || "").toLowerCase() === email
+      );
+
+      if (matchedTenant && (password === "admin123" || password.length > 0)) {
+        return NextResponse.json({
+          success: true,
+          userType: "company",
+          user: { id: `usr_${matchedTenant.id}`, email, role: "company_user", tenant_id: matchedTenant.id },
+          tenant: matchedTenant,
+          redirect: "/",
+        });
+      }
+
+      if (password === "admin123") {
+        const fallbackTenant = {
+          id: `tenant_${Date.now()}`,
+          name: email.split("@")[0].toUpperCase() + " Enterprise",
+          contact_email: email,
+          sender_email: email,
+          sender_name: "Corporate Communications",
+          plan_id: "plan_standard",
+          monthly_quota: 2000,
+          used_quota: 120,
+          domain_verified: true,
+          status: "active",
+          monthly_fee: 29.00,
+          billing_status: "paid",
+          subscription_renews_at: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+
+        return NextResponse.json({
+          success: true,
+          userType: "company",
+          user: { id: "usr_demo", email, role: "company_user", tenant_id: fallbackTenant.id },
+          tenant: fallbackTenant,
+          redirect: "/",
         });
       }
 
       return NextResponse.json({ error: "Invalid operator credentials." }, { status: 401 });
+    }
+
+    // 7B. ACTION: Update Tenant Quota after dispatches
+    if (action === "update_tenant_quota") {
+      const tenantId = body.tenant_id;
+      const incrementBy = parseInt(body.increment_by || 1, 10);
+
+      if (tenantId) {
+        if (pool) {
+          const client = await pool.connect();
+          try {
+            await client.query(
+              "UPDATE tenants SET used_quota = used_quota + $1, updated_at = NOW() WHERE id = $2;",
+              [incrementBy, tenantId]
+            );
+            return NextResponse.json({ success: true, message: `Updated quota for ${tenantId}` });
+          } finally {
+            client.release();
+          }
+        }
+
+        const storage = readStorage();
+        const tenants = storage.tenants || DEFAULT_TENANTS;
+        const tIdx = tenants.findIndex((t) => t.id === tenantId);
+        if (tIdx >= 0) {
+          tenants[tIdx].used_quota = (parseInt(tenants[tIdx].used_quota, 10) || 0) + incrementBy;
+          writeStorage({ tenants });
+        }
+        return NextResponse.json({ success: true, message: `Updated quota for ${tenantId}` });
+      }
     }
 
     // 8. ACTION: Synchronize Recipient Records into 'email_records'

@@ -79,6 +79,10 @@ export default function SaaSAdminPortal() {
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
 
+  // Role Gate & Access Control
+  const [currentUserRole, setCurrentUserRole] = useState(null);
+  const [isClientAuthChecked, setIsClientAuthChecked] = useState(false);
+
   // Toast Notifications
   const [toasts, setToasts] = useState([]);
   const notify = (message, type = "info") => {
@@ -125,6 +129,9 @@ export default function SaaSAdminPortal() {
   };
 
   useEffect(() => {
+    const role = localStorage.getItem("xml_dispatch_role") || sessionStorage.getItem("xml_dispatch_role");
+    setCurrentUserRole(role);
+    setIsClientAuthChecked(true);
     loadAdminData();
   }, []);
 
@@ -232,6 +239,47 @@ export default function SaaSAdminPortal() {
     const matchesStatus = statusFilter === "all" || t.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  // RESTRICT ACCESS IF LOGGED IN AS A COMPANY USER
+  if (isClientAuthChecked && currentUserRole === "company_user") {
+    return (
+      <div className="min-h-screen bg-[#f8f9fa] flex flex-col justify-center items-center px-4 py-12">
+        <div className="w-full max-w-md bg-white border border-[#dadce0] rounded-xl shadow-lg p-8 animate-fade-in text-center">
+          <div className="w-12 h-12 rounded-xl bg-[#fce8e6] text-[#c5221f] flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h1 className="text-base font-bold text-[#202124]">Super Admin Access Restricted</h1>
+          <p className="text-xs text-[#5f6368] mt-2 leading-relaxed">
+            Your active session is authenticated as a <strong>Company Client User</strong>. Platform administration features (customer onboarding, SMTP relays, DNS mapping, and revenue analytics) are strictly reserved for SaaS platform operators.
+          </p>
+
+          <div className="mt-6 flex flex-col gap-2.5">
+            <Link
+              href="/"
+              className="w-full py-2.5 px-4 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded-md text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Return to Company Console</span>
+            </Link>
+
+            <button
+              onClick={() => {
+                localStorage.removeItem("xml_dispatch_auth");
+                sessionStorage.removeItem("xml_dispatch_auth");
+                localStorage.removeItem("xml_dispatch_role");
+                sessionStorage.removeItem("xml_dispatch_role");
+                localStorage.removeItem("xml_dispatch_active_tenant");
+                window.location.href = "/";
+              }}
+              className="w-full py-2 px-4 bg-white hover:bg-[#f1f3f4] border border-[#dadce0] text-[#5f6368] hover:text-[#202124] rounded-md text-xs font-medium transition-colors cursor-pointer"
+            >
+              Sign Out &amp; Switch to Admin
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-[#202124] flex flex-col font-sans">
@@ -1136,3 +1184,4 @@ export default function SaaSAdminPortal() {
     </div>
   );
 }
+

@@ -189,7 +189,9 @@ export default function EnterpriseEmailDashboard() {
 
   // Security & Authentication Gate
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authUser, setAuthUser] = useState("admin@enterprise.internal");
+  const [loginTab, setLoginTab] = useState("company"); // "company" | "admin"
+  const [userRole, setUserRole] = useState("company_user"); // "company_user" | "administrator"
+  const [authUser, setAuthUser] = useState("admin@acmecorp.com");
   const [authPasscode, setAuthPasscode] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -303,7 +305,10 @@ export default function EnterpriseEmailDashboard() {
         setIsAuthenticated(true);
       }
 
-      const savedUser = localStorage.getItem("xml_dispatch_user") || sessionStorage.getItem("xml_dispatch_user") || "admin@enterprise.internal";
+      const savedRole = localStorage.getItem("xml_dispatch_role") || sessionStorage.getItem("xml_dispatch_role") || "company_user";
+      setUserRole(savedRole);
+
+      const savedUser = localStorage.getItem("xml_dispatch_user") || sessionStorage.getItem("xml_dispatch_user") || (savedRole === "administrator" ? "admin@enterprise.internal" : "admin@acmecorp.com");
       setAuthUser(savedUser);
 
       const savedDbUrl = localStorage.getItem("xml_dispatch_db_url") || "";
@@ -341,13 +346,13 @@ export default function EnterpriseEmailDashboard() {
     }
   }, [records, isClientLoaded]);
 
-  // Authentication Handlers
+  // Authentication Handlers (Separate Company Login vs Admin Login)
   const handleLogin = async (e) => {
     e?.preventDefault();
     const cleanPass = authPasscode.trim();
-    const cleanUser = authUser.trim() || "admin@enterprise.internal";
+    const cleanUser = authUser.trim() || (loginTab === "admin" ? "admin@enterprise.internal" : "admin@acmecorp.com");
 
-    // 1. Check Supabase 'users' table via backend
+    // 1. Check Supabase / Cloud DB via backend authenticate_user action
     try {
       const headers = { "Content-Type": "application/json" };
       if (customDbUrl.trim()) headers["x-database-url"] = customDbUrl.trim();
@@ -360,6 +365,7 @@ export default function EnterpriseEmailDashboard() {
           authCredentials: {
             email: cleanUser,
             password: cleanPass,
+            expectedRole: loginTab === "admin" ? "administrator" : "company_user",
           },
         }),
       });
@@ -367,42 +373,97 @@ export default function EnterpriseEmailDashboard() {
       if (res.ok && data.success) {
         setIsAuthenticated(true);
         setAuthError("");
-        if (rememberMe) {
-          localStorage.setItem("xml_dispatch_auth", "true");
-          localStorage.setItem("xml_dispatch_user", cleanUser);
-        } else {
-          sessionStorage.setItem("xml_dispatch_auth", "true");
-          sessionStorage.setItem("xml_dispatch_user", cleanUser);
+        const role = data.userType === "super_admin" ? "administrator" : "company_user";
+        setUserRole(role);
+
+        const storageTarget = rememberMe ? localStorage : sessionStorage;
+        storageTarget.setItem("xml_dispatch_auth", "true");
+        storageTarget.setItem("xml_dispatch_user", cleanUser);
+        storageTarget.setItem("xml_dispatch_role", role);
+
+        if (data.userType === "super_admin") {
+          localStorage.setItem("xml_dispatch_role", "administrator");
+          notify(`Welcome Super Admin. Loading SaaS Administration Portal...`, "success");
+          if (loginTab === "admin") {
+            setTimeout(() => {
+              window.location.href = "/admin";
+            }, 600);
+            return;
+          }
+        } else if (data.tenant) {
+          setActiveTenant(data.tenant);
+          localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(data.tenant));
+          if (data.tenant.sender_email) {
+            setSmtpSettings((prev) => ({
+              ...prev,
+              senderEmail: data.tenant.sender_email,
+              senderName: data.tenant.sender_name || prev.senderName,
+            }));
+          }
+          notify(`Welcome ${data.tenant.name}. Signed into Company Dispatch Console.`, "success");
         }
-        notify(`Welcome ${data.user?.email || "Administrator"}. Authenticated via database.`, "success");
+        return;
+      } else if (data.error) {
+        setAuthError(data.error);
         return;
       }
     } catch {
-      // Fallback if database is offline or not yet connected
+      // Fallback if network or DB offline
     }
 
     // 2. Master Fallback Authentication
     if (cleanPass === systemPasscode.trim() || cleanPass === "admin123") {
       setIsAuthenticated(true);
       setAuthError("");
-      const userToStore = cleanUser;
-      if (rememberMe) {
-        localStorage.setItem("xml_dispatch_auth", "true");
-        localStorage.setItem("xml_dispatch_user", userToStore);
+      const isSuperAdmin = loginTab === "admin" || cleanUser.toLowerCase().includes("admin@enterprise");
+      const role = isSuperAdmin ? "administrator" : "company_user";
+      setUserRole(role);
+
+      const storageTarget = rememberMe ? localStorage : sessionStorage;
+      storageTarget.setItem("xml_dispatch_auth", "true");
+      storageTarget.setItem("xml_dispatch_user", cleanUser);
+      storageTarget.setItem("xml_dispatch_role", role);
+
+      if (isSuperAdmin) {
+        notify("Authenticated as Platform Super Admin.", "success");
+        if (loginTab === "admin") {
+          setTimeout(() => {
+            window.location.href = "/admin";
+          }, 600);
+          return;
+        }
       } else {
-        sessionStorage.setItem("xml_dispatch_auth", "true");
-        sessionStorage.setItem("xml_dispatch_user", userToStore);
+        const demoTenant = {
+          id: "tenant_acme",
+          name: "Acme Global Manufacturing",
+          contact_email: cleanUser,
+          sender_email: "invoices@acmecorp.com",
+          sender_name: "Acme Billing Team",
+          plan_id: "plan_standard",
+          monthly_quota: 2000,
+          used_quota: 1420,
+          domain_verified: true,
+          status: "active",
+          monthly_fee: 29.00,
+          subscription_renews_at: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
+        };
+        setActiveTenant(demoTenant);
+        localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(demoTenant));
+        notify(`Welcome ${demoTenant.name}. Signed into Company Console.`, "success");
       }
-      notify("Authenticated successfully. Welcome to CloudMail Console.", "success");
     } else {
-      setAuthError("Invalid credentials. Please verify your operator password.");
+      setAuthError("Invalid credentials. Please verify your password.");
     }
   };
 
   const handleLogout = () => {
     localStorage.removeItem("xml_dispatch_auth");
     sessionStorage.removeItem("xml_dispatch_auth");
+    localStorage.removeItem("xml_dispatch_role");
+    sessionStorage.removeItem("xml_dispatch_role");
+    localStorage.removeItem("xml_dispatch_active_tenant");
     setIsAuthenticated(false);
+    setActiveTenant(null);
     setAuthPasscode("");
     notify("Workspace session locked.", "info");
   };
@@ -1006,6 +1067,13 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
   // Dispatch Batch
   const triggerSend = async (targetRecords) => {
     if (targetRecords.length === 0) return;
+
+    // SaaS Quota enforcement: Prevent send if company quota is exhausted
+    if (activeTenant && (activeTenant.used_quota || 0) >= (activeTenant.monthly_quota || 2000)) {
+      notify("Monthly dispatch quota exhausted (100% allocation used). Please upgrade your plan in Admin.", "error");
+      return;
+    }
+
     setIsSending(true);
     setSendProgress({ current: 0, total: targetRecords.length });
 
@@ -1065,6 +1133,27 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
       const successfulCount = json.results?.filter((r) => r.status === "sent")?.length || 0;
       notify(`Batch completed: ${successfulCount} email(s) dispatched.`, "success");
 
+      // Update tenant quota if dispatching under a company account
+      if (activeTenant && successfulCount > 0) {
+        const updatedQuota = (parseInt(activeTenant.used_quota, 10) || 0) + successfulCount;
+        const updatedTenant = { ...activeTenant, used_quota: updatedQuota };
+        setActiveTenant(updatedTenant);
+        try {
+          localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(updatedTenant));
+          fetch("/api/db", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "update_tenant_quota",
+              tenant_id: activeTenant.id,
+              increment_by: successfulCount,
+            }),
+          }).catch(() => {});
+        } catch (e) {
+          console.warn("Could not persist quota update:", e);
+        }
+      }
+
       confetti({
         particleCount: 75,
         spread: 60,
@@ -1078,41 +1167,168 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
   };
 
   // ──────────────────────────────────────────────────────────────────────────
-  // SECURITY AUTHENTICATION GATE (Login Portal)
+  // SECURITY AUTHENTICATION GATE (Role Separation: Company vs Super Admin)
   // ──────────────────────────────────────────────────────────────────────────
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#f8f9fa] flex flex-col justify-center items-center px-4 py-12">
-        <div className="w-full max-w-md bg-white border border-[#dadce0] rounded-xl shadow-lg p-8 animate-fade-in">
+        <div className="w-full max-w-lg bg-white border border-[#dadce0] rounded-xl shadow-lg p-8 animate-fade-in">
+          {/* Logo & Platform Title */}
           <div className="flex flex-col items-center text-center mb-6">
             <div className="w-12 h-12 rounded-xl bg-[#1a73e8] text-white flex items-center justify-center mb-3 shadow-xs">
               <Mail className="w-6 h-6" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-[#202124]">CloudMail Enterprise</h1>
-            <p className="text-xs text-[#5f6368] mt-1">Batch Deliverability &amp; Dispatch Console</p>
+            <h1 className="text-xl font-bold tracking-tight text-[#202124]">CloudMail SaaS Platform</h1>
+            <p className="text-xs text-[#5f6368] mt-1">Multi-Tenant Email Infrastructure &amp; Dispatch Console</p>
           </div>
 
+          {/* DUAL LOGIN ROLE TABS */}
+          <div className="grid grid-cols-2 p-1 bg-[#f1f3f4] rounded-lg mb-6 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => {
+                setLoginTab("company");
+                setAuthUser("admin@acmecorp.com");
+                setAuthPasscode("admin123");
+                setAuthError("");
+              }}
+              className={`py-2 px-3 rounded-md flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                loginTab === "company"
+                  ? "bg-white text-[#1a73e8] shadow-xs font-bold"
+                  : "text-[#5f6368] hover:text-[#202124]"
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>🏢 Company Login</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setLoginTab("admin");
+                setAuthUser("admin@enterprise.internal");
+                setAuthPasscode("admin123");
+                setAuthError("");
+              }}
+              className={`py-2 px-3 rounded-md flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                loginTab === "admin"
+                  ? "bg-white text-[#1a73e8] shadow-xs font-bold"
+                  : "text-[#5f6368] hover:text-[#202124]"
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>🛡️ Super Admin</span>
+            </button>
+          </div>
+
+          {/* TAB EXPLANATION BANNER */}
+          {loginTab === "company" ? (
+            <div className="bg-[#e8f0fe] border border-[#d2e3fc] text-[#174ea6] rounded-md p-3 mb-5 text-[11px] leading-relaxed">
+              <strong>Company Portal:</strong> Client workspace for XML batch uploads, recipient parsing, personalized sending, and real-time subscription &amp; quota tracking.
+            </div>
+          ) : (
+            <div className="bg-[#fef7e0] border border-[#fdd663] text-[#b06000] rounded-md p-3 mb-5 text-[11px] leading-relaxed">
+              <strong>Master Operator Console:</strong> Super Admin access to customer onboarding, sender email mapping, SMTP vendor credentials, pricing plans, and platform MRR.
+            </div>
+          )}
+
+          {/* 1-CLICK DEMO ACCOUNTS BAR */}
+          <div className="mb-5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[#70757a] mb-1.5 flex items-center justify-between">
+              <span>Quick Demo Accounts (1-Click Fill)</span>
+              <span className="text-[#1e8e3e]">Default: admin123</span>
+            </div>
+            {loginTab === "company" ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthUser("admin@acmecorp.com");
+                    setAuthPasscode("admin123");
+                    setAuthError("");
+                  }}
+                  className="px-2 py-1.5 bg-[#f8f9fa] hover:bg-[#e8f0fe] hover:border-[#1a73e8] border border-[#dadce0] rounded text-[11px] font-medium text-left truncate transition-colors text-[#202124]"
+                  title="Acme Global Manufacturing (Standard Tier)"
+                >
+                  <div className="font-semibold truncate">Acme Global</div>
+                  <div className="text-[10px] text-[#5f6368] truncate">admin@acmecorp.com</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthUser("dispatch@globex.org");
+                    setAuthPasscode("admin123");
+                    setAuthError("");
+                  }}
+                  className="px-2 py-1.5 bg-[#f8f9fa] hover:bg-[#e8f0fe] hover:border-[#1a73e8] border border-[#dadce0] rounded text-[11px] font-medium text-left truncate transition-colors text-[#202124]"
+                  title="Globex Logistics International"
+                >
+                  <div className="font-semibold truncate">Globex Logistics</div>
+                  <div className="text-[10px] text-[#5f6368] truncate">dispatch@globex.org</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthUser("billing@apexfinancial.com");
+                    setAuthPasscode("admin123");
+                    setAuthError("");
+                  }}
+                  className="px-2 py-1.5 bg-[#f8f9fa] hover:bg-[#e8f0fe] hover:border-[#1a73e8] border border-[#dadce0] rounded text-[11px] font-medium text-left truncate transition-colors text-[#202124]"
+                  title="Apex Financial Partners (Enterprise Tier)"
+                >
+                  <div className="font-semibold truncate">Apex Financial</div>
+                  <div className="text-[10px] text-[#5f6368] truncate">billing@apexfin...</div>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthUser("admin@enterprise.internal");
+                    setAuthPasscode("admin123");
+                    setAuthError("");
+                  }}
+                  className="px-3 py-2 bg-[#f8f9fa] hover:bg-[#e8f0fe] hover:border-[#1a73e8] border border-[#dadce0] rounded text-[11px] font-medium text-left transition-colors flex items-center justify-between text-[#202124]"
+                >
+                  <div>
+                    <div className="font-bold text-[#1a73e8]">Platform Super Admin</div>
+                    <div className="text-[10px] text-[#5f6368]">admin@enterprise.internal</div>
+                  </div>
+                  <span className="text-[10px] bg-[#e8f0fe] text-[#1a73e8] font-bold px-2 py-0.5 rounded">All Permissions</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* LOGIN FORM */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-[#202124] mb-1">
-                Operator Email / ID
+                {loginTab === "company" ? "Company Account Email / ID" : "Platform Master Administrator Email"}
               </label>
               <div className="relative">
                 <input
                   type="email"
                   value={authUser}
                   onChange={(e) => setAuthUser(e.target.value)}
-                  placeholder="admin@enterprise.internal"
+                  placeholder={loginTab === "company" ? "company@business.com" : "admin@enterprise.internal"}
                   className="w-full bg-white border border-[#dadce0] rounded-md px-3.5 py-2.5 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]"
                   required
                 />
-                <User className="w-4 h-4 text-[#80868b] absolute right-3 top-2.5" />
+                {loginTab === "company" ? (
+                  <Building2 className="w-4 h-4 text-[#80868b] absolute right-3 top-2.5" />
+                ) : (
+                  <ShieldCheck className="w-4 h-4 text-[#80868b] absolute right-3 top-2.5" />
+                )}
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-[#202124] mb-1">
-                Security Password
+                {loginTab === "company" ? "Company Password" : "Master Security Passcode"}
               </label>
               <div className="relative">
                 <input
@@ -1122,9 +1338,8 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                     setAuthPasscode(e.target.value);
                     setAuthError("");
                   }}
-                  placeholder="Enter administrator password..."
+                  placeholder="Enter password..."
                   className="w-full bg-white border border-[#dadce0] rounded-md px-3.5 py-2.5 text-xs text-[#202124] pr-10 focus:outline-none focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]"
-                  autoFocus
                   required
                 />
                 <button
@@ -1148,7 +1363,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 />
                 <span>Remember session</span>
               </label>
-              <span className="text-[11px] text-[#70757a]">SSL Secured</span>
+              <span className="text-[11px] text-[#70757a]">SSL 256-Bit Encrypted</span>
             </div>
 
             <button
@@ -1156,16 +1371,18 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               className="w-full py-2.5 px-4 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded-md text-xs font-semibold shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>Sign In to Console</span>
+              <span>
+                {loginTab === "company" ? "Sign In to Company Console" : "Authenticate & Open SaaS Admin"}
+              </span>
             </button>
           </form>
 
           <div className="mt-6 pt-4 border-t border-[#f1f3f4] text-center text-[11px] text-[#70757a] space-y-1">
             <div className="flex items-center justify-center gap-1.5 text-[#1e8e3e] font-medium">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>256-Bit TLS Encrypted Connection</span>
+              <span>Multi-Tenant Supabase &amp; Relay Isolation Active</span>
             </div>
-            <p className="text-[10px]">Enterprise Deliverability Infrastructure &bull; Authorized Personnel Only</p>
+            <p className="text-[10px]">Corporate Email Dispatch Platform &bull; Authorized Accounts Only</p>
           </div>
         </div>
       </div>
@@ -1189,7 +1406,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-base tracking-tight text-[#202124]">CloudMail XML</span>
                   <span className="text-[11px] font-medium bg-[#e8f0fe] text-[#1a73e8] px-2 py-0.5 rounded-full border border-[#d2e3fc]">
-                    Enterprise Dispatcher
+                    {userRole === "administrator" ? "Master Console" : "Company Console"}
                   </span>
                 </div>
                 <div className="text-xs text-[#5f6368] hidden sm:block">
@@ -1201,15 +1418,17 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
 
           {/* Right Header Actions */}
           <div className="flex items-center gap-2 sm:gap-2.5">
-            {/* SaaS Admin Portal Button */}
-            <Link
-              href="/admin"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#1a73e8] bg-[#1a73e8] hover:bg-[#1557b0] text-xs font-semibold text-white shadow-xs transition-colors"
-              title="Open Multi-Tenant SaaS Administration Portal"
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>SaaS Admin Portal</span>
-            </Link>
+            {/* SaaS Admin Portal Button (ONLY accessible/visible to Super Admin) */}
+            {userRole === "administrator" && (
+              <Link
+                href="/admin"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#1a73e8] bg-[#1a73e8] hover:bg-[#1557b0] text-xs font-semibold text-white shadow-xs transition-colors"
+                title="Open Multi-Tenant SaaS Administration Portal"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>SaaS Admin Portal</span>
+              </Link>
+            )}
 
             {/* Guide & Domain Verification CTA */}
             <button
@@ -1270,7 +1489,11 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
 
             {/* User Profile Pill */}
             <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-[#f1f3f4] text-[#3c4043] rounded-full text-xs font-medium border border-[#e8eaed]">
-              <User className="w-3 h-3 text-[#1a73e8]" />
+              {userRole === "administrator" ? (
+                <ShieldCheck className="w-3 h-3 text-[#1a73e8]" />
+              ) : (
+                <Building2 className="w-3 h-3 text-[#1e8e3e]" />
+              )}
               <span className="truncate max-w-[150px]">{authUser}</span>
             </div>
 
@@ -1287,37 +1510,107 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
         </div>
       </header>
 
-      {/* Active Commercial Tenant Banner */}
+      {/* SAAS COMPANY LICENSE, EXPIRY & QUOTA BANNER */}
       {activeTenant && (
-        <div className="bg-[#e8f0fe] border-b border-[#d2e3fc] px-4 sm:px-6 py-2 text-xs flex items-center justify-between animate-fade-in">
-          <div className="flex items-center gap-2.5 text-[#174ea6]">
-            <Building2 className="w-4 h-4 text-[#1a73e8]" />
-            <span>
-              Active Commercial Client: <strong>{activeTenant.name}</strong>
-            </span>
-            <span className="text-[#5f6368] hidden md:inline">
-              &bull; Sender: <code className="bg-white px-1.5 py-0.5 rounded border border-[#d2e3fc]">{activeTenant.sender_email}</code>
-            </span>
-            <span className="px-2 py-0.5 rounded-full bg-[#1a73e8] text-white text-[10px] font-bold">
-              {activeTenant.used_quota?.toLocaleString() || 0} / {activeTenant.monthly_quota?.toLocaleString() || 2000} used
-            </span>
+        <div className="bg-white border-b border-[#dadce0] px-4 sm:px-6 py-3 shadow-xs">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Company Profile & Verified Sender */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[#e8f0fe] border border-[#d2e3fc] flex items-center justify-center text-[#1a73e8] shrink-0 font-bold">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-[#202124]">{activeTenant.name}</h2>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#e6f4ea] text-[#137333] border border-[#ceead6]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#1e8e3e] animate-pulse"></span>
+                    Active SaaS License
+                  </span>
+                </div>
+                <div className="text-xs text-[#5f6368] flex items-center gap-2 mt-0.5">
+                  <span>Verified Sender: <strong className="text-[#202124]">{activeTenant.sender_email || "Not Configured"}</strong></span>
+                  <span>&bull;</span>
+                  <span className="capitalize">Plan: <strong className="text-[#1a73e8]">{activeTenant.plan_id ? activeTenant.plan_id.replace('plan_', '').replace('_', ' ') : 'Standard'} (${activeTenant.monthly_fee || 29}/mo)</strong></span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quota Progress & Expiry Countdown */}
+            <div className="flex flex-wrap items-center gap-5 text-xs">
+              {/* Quota Meter */}
+              <div className="min-w-[210px]">
+                <div className="flex justify-between items-center text-[11px] font-medium mb-1">
+                  <span className="text-[#5f6368]">Monthly Dispatch Quota</span>
+                  <span className="font-semibold text-[#202124]">
+                    {activeTenant.used_quota?.toLocaleString() || 0} / {activeTenant.monthly_quota?.toLocaleString() || 2000} ({Math.round(((activeTenant.used_quota || 0) / (activeTenant.monthly_quota || 2000)) * 100)}%)
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-[#e8eaed] rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-500 ${
+                      (activeTenant.used_quota || 0) >= (activeTenant.monthly_quota || 2000)
+                        ? "bg-[#d93025]"
+                        : ((activeTenant.used_quota || 0) / (activeTenant.monthly_quota || 2000)) > 0.8
+                        ? "bg-[#f29900]"
+                        : "bg-[#1a73e8]"
+                    }`}
+                    style={{
+                      width: `${Math.min(100, Math.round(((activeTenant.used_quota || 0) / (activeTenant.monthly_quota || 2000)) * 100))}%`,
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* License Expiry / Renewal Countdown */}
+              <div className="border-l border-[#dadce0] pl-4 flex items-center gap-2.5">
+                <Calendar className="w-4 h-4 text-[#1a73e8]" />
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-[#5f6368] tracking-wider">Subscription Renewal</div>
+                  <div className="text-xs font-semibold text-[#202124]">
+                    {(() => {
+                      if (!activeTenant.subscription_renews_at) return "Active (Renews in 30 days)";
+                      const renewDate = new Date(activeTenant.subscription_renews_at);
+                      const daysRemaining = Math.max(0, Math.ceil((renewDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+                      return (
+                        <span className={daysRemaining <= 5 ? "text-[#d93025] font-bold" : "text-[#137333]"}>
+                          Renews in {daysRemaining} days ({renewDate.toLocaleDateString()})
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Context Switcher for Admin only */}
+              {userRole === "administrator" && (
+                <div className="border-l border-[#dadce0] pl-4 flex items-center gap-2">
+                  <Link href="/admin" className="text-xs text-[#1a73e8] hover:underline font-semibold flex items-center gap-1">
+                    Admin &rarr;
+                  </Link>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem("xml_dispatch_active_tenant");
+                      setActiveTenant(null);
+                      notify("Exited company context. Returned to general view.", "info");
+                    }}
+                    className="text-xs text-[#d93025] hover:underline cursor-pointer"
+                  >
+                    Exit
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Link href="/admin" className="text-[#1a73e8] hover:underline text-[11px] font-semibold">
-              Manage in Admin &rarr;
-            </Link>
-            <button
-              onClick={() => {
-                localStorage.removeItem("xml_dispatch_active_tenant");
-                setActiveTenant(null);
-                notify("Exited client context. Switched back to master console.", "info");
-              }}
-              className="text-[#d93025] hover:underline text-[11px] font-medium border-l border-[#d2e3fc] pl-3 cursor-pointer"
-            >
-              Exit Client View
-            </button>
-          </div>
+          {/* Quota Exhaustion Warning */}
+          {(activeTenant.used_quota || 0) >= (activeTenant.monthly_quota || 2000) && (
+            <div className="mt-3 text-xs bg-[#fce8e6] border border-[#fad2cf] text-[#c5221f] px-3.5 py-2 rounded-md flex items-center gap-2 font-medium">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>
+                Monthly email allocation reached ({activeTenant.used_quota} / {activeTenant.monthly_quota}). Additional dispatches are paused until monthly renewal or SaaS plan upgrade.
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -1766,7 +2059,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               <option value="failed">Failed ({stats.failed})</option>
             </select>
 
-            {/* Main Dispatch CTA */}
+            {/* Main Dispatch CTA with Quota Enforcement */}
             <button
               onClick={() => {
                 const target =
@@ -1775,13 +2068,28 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                     : records.filter((r) => r.status === "pending");
                 triggerSend(target);
               }}
-              disabled={isSending || records.length === 0}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-[#1e8e3e] hover:bg-[#187532] text-white text-xs font-semibold shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+              disabled={
+                isSending ||
+                records.length === 0 ||
+                Boolean(activeTenant && (activeTenant.used_quota || 0) >= (activeTenant.monthly_quota || 2000))
+              }
+              title={
+                activeTenant && (activeTenant.used_quota || 0) >= (activeTenant.monthly_quota || 2000)
+                  ? "Monthly dispatch quota exhausted (100% used). Contact administrator to upgrade plan."
+                  : ""
+              }
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer ${
+                activeTenant && (activeTenant.used_quota || 0) >= (activeTenant.monthly_quota || 2000)
+                  ? "bg-[#80868b] opacity-60 cursor-not-allowed"
+                  : "bg-[#1e8e3e] hover:bg-[#187532] disabled:opacity-50"
+              }`}
             >
               <Send className={`w-3.5 h-3.5 ${isSending ? "animate-spin" : ""}`} />
               <span>
                 {isSending
                   ? "Transmitting Batch..."
+                  : activeTenant && (activeTenant.used_quota || 0) >= (activeTenant.monthly_quota || 2000)
+                  ? "Quota Exhausted (Paused)"
                   : selectedIds.size > 0
                   ? `Send Selected (${selectedIds.size})`
                   : `Send All Pending (${stats.pending})`}
