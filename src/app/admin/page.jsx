@@ -28,6 +28,9 @@ import {
   Database,
   Calendar,
   Lock,
+  LogOut,
+  PauseCircle,
+  Play,
 } from "lucide-react";
 
 export default function SaaSAdminPortal() {
@@ -216,17 +219,40 @@ export default function SaaSAdminPortal() {
     }
   };
 
-  // Launch Console as Customer
-  const handleLaunchAsTenant = (tenant) => {
+  // Suspend / Activate Tenant Toggle
+  const handleToggleSuspendTenant = async (tenant) => {
+    const nextStatus = tenant.status === "active" ? "suspended" : "active";
+    setIsSaving(true);
     try {
-      localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(tenant));
-      notify(`Switching context to ${tenant.name}...`, "success");
-      setTimeout(() => {
-        window.location.href = "/";
-      }, 500);
-    } catch (e) {
-      console.warn(e);
-      window.location.href = "/";
+      const payload = {
+        ...tenant,
+        status: nextStatus,
+      };
+
+      const headers = { "Content-Type": "application/json" };
+      if (customDbUrl.trim()) headers["x-database-url"] = customDbUrl.trim();
+
+      const res = await fetch("/api/db", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "create_tenant",
+          connectionString: customDbUrl.trim() || undefined,
+          tenant: payload,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notify(`Customer '${tenant.name}' is now ${nextStatus}.`, "success");
+        loadAdminData();
+      } else {
+        notify(data.error || "Failed to update customer status.", "error");
+      }
+    } catch {
+      notify("Network error while updating status.", "error");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -338,13 +364,26 @@ export default function SaaSAdminPortal() {
               <span className="hidden sm:inline">Refresh Data</span>
             </button>
 
-            <Link
-              href="/"
-              className="px-3.5 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded text-xs font-semibold inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-[#f1f3f4] text-[#3c4043] rounded-md text-xs font-medium border border-[#dadce0]">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#1a73e8]" />
+              <span className="font-semibold text-[#202124]">Superadmin Console</span>
+            </div>
+
+            <button
+              onClick={() => {
+                localStorage.removeItem("xml_dispatch_auth");
+                sessionStorage.removeItem("xml_dispatch_auth");
+                localStorage.removeItem("xml_dispatch_role");
+                sessionStorage.removeItem("xml_dispatch_role");
+                localStorage.removeItem("xml_dispatch_active_tenant");
+                window.location.href = "/";
+              }}
+              className="px-3 py-1.5 bg-white border border-[#dadce0] hover:bg-[#fce8e6] text-[#5f6368] hover:text-[#c5221f] rounded text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Sign Out of Super Admin Console"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Launch Dispatch Console</span>
-            </Link>
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
           </div>
         </div>
       </header>
@@ -360,10 +399,10 @@ export default function SaaSAdminPortal() {
               <DollarSign className="w-4 h-4 text-[#1e8e3e]" />
             </div>
             <div className="my-2">
-              <div className="text-2xl font-bold text-[#202124]">${metrics.mrr?.toFixed(2)}</div>
+              <div className="text-2xl font-bold text-[#202124]">${Number(metrics.mrr || 0).toFixed(2)}</div>
               <div className="text-[11px] text-[#137333] font-medium mt-0.5 flex items-center gap-1">
                 <TrendingUp className="w-3.5 h-3.5" />
-                <span>ARR Run-Rate: ${(metrics.mrr * 12).toLocaleString()} / yr</span>
+                <span>ARR Run-Rate: ${(Number(metrics.mrr || 0) * 12).toLocaleString()} / yr</span>
               </div>
             </div>
             <div className="text-[10px] text-[#70757a] pt-2 border-t border-[#f1f3f4]">
@@ -396,20 +435,20 @@ export default function SaaSAdminPortal() {
             </div>
             <div className="my-2">
               <div className="text-2xl font-bold text-[#202124]">
-                {metrics.aggregateQuotaUsed?.toLocaleString()} <span className="text-xs font-normal text-[#5f6368]">/ {metrics.aggregateTotalQuota?.toLocaleString()}</span>
+                {Number(metrics.aggregateQuotaUsed || 0).toLocaleString()} <span className="text-xs font-normal text-[#5f6368]">/ {Number(metrics.aggregateTotalQuota || 0).toLocaleString()}</span>
               </div>
               <div className="w-full bg-[#f1f3f4] h-1.5 rounded-full mt-2 overflow-hidden">
                 <div
                   className="bg-[#1a73e8] h-full rounded-full transition-all"
                   style={{
-                    width: `${Math.min(100, (metrics.aggregateQuotaUsed / Math.max(1, metrics.aggregateTotalQuota)) * 100)}%`,
+                    width: `${Math.min(100, (Number(metrics.aggregateQuotaUsed || 0) / Math.max(1, Number(metrics.aggregateTotalQuota || 1))) * 100)}%`,
                   }}
                 />
               </div>
             </div>
             <div className="text-[10px] text-[#70757a] pt-2 border-t border-[#f1f3f4] flex justify-between">
               <span>Avg 2,000 emails/client</span>
-              <span>{((metrics.aggregateQuotaUsed / Math.max(1, metrics.aggregateTotalQuota)) * 100).toFixed(0)}% Utilized</span>
+              <span>{((Number(metrics.aggregateQuotaUsed || 0) / Math.max(1, Number(metrics.aggregateTotalQuota || 1))) * 100).toFixed(0)}% Utilized</span>
             </div>
           </div>
 
@@ -420,13 +459,13 @@ export default function SaaSAdminPortal() {
               <Activity className="w-4 h-4 text-[#1e8e3e]" />
             </div>
             <div className="my-2">
-              <div className="text-2xl font-bold text-[#1e8e3e]">{metrics.profitMargin}%</div>
+              <div className="text-2xl font-bold text-[#1e8e3e]">{Number(metrics.profitMargin || 0).toFixed(1)}%</div>
               <div className="text-[11px] text-[#5f6368] font-medium mt-0.5">
-                Net Profit: <strong className="text-[#137333]">${metrics.netProfit?.toFixed(2)}/mo</strong>
+                Net Profit: <strong className="text-[#137333]">${Number(metrics.netProfit || 0).toFixed(2)}/mo</strong>
               </div>
             </div>
             <div className="text-[10px] text-[#70757a] pt-2 border-t border-[#f1f3f4]">
-              Est. Infra Cost: ${metrics.estInfrastructureCost}/mo (SES + DB + Vercel)
+              Est. Infra Cost: ${Number(metrics.estInfrastructureCost || 49).toFixed(2)}/mo (SES + DB + Vercel)
             </div>
           </div>
         </div>
@@ -604,11 +643,11 @@ export default function SaaSAdminPortal() {
                                 style={{ width: `${quotaPercent}%` }}
                               />
                             </div>
-                            <div className="text-[10px] text-[#5f6368] mt-1">{quotaPercent.toFixed(0)}% Dispatched</div>
+                            <div className="text-[10px] text-[#5f6368] mt-1">{Number(quotaPercent || 0).toFixed(0)}% Dispatched</div>
                           </td>
 
                           <td className="py-3 px-3.5">
-                            <div className="font-bold text-[#202124]">${(tenant.monthly_fee || 29).toFixed(2)}/mo</div>
+                            <div className="font-bold text-[#202124]">${(Number(tenant.monthly_fee) || 29).toFixed(2)}/mo</div>
                             <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-[#e6f4ea] text-[#137333]">
                               {tenant.billing_status?.toUpperCase() || "PAID"}
                             </span>
@@ -629,26 +668,32 @@ export default function SaaSAdminPortal() {
 
                           <td className="py-3 px-3.5 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* 1. Toggle Suspend / Reactivate Customer */}
                               <button
-                                onClick={() => handleLaunchAsTenant(tenant)}
-                                title="Launch Dispatch Console for this client"
-                                className="px-2 py-1 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+                                onClick={() => handleToggleSuspendTenant(tenant)}
+                                title={tenant.status === "active" ? "Suspend Customer Account" : "Reactivate Customer Account"}
+                                className={`p-1.5 rounded text-xs transition-colors ${
+                                  tenant.status === "active"
+                                    ? "text-[#e37400] hover:bg-[#fef7e0]"
+                                    : "text-[#1e8e3e] hover:bg-[#e6f4ea]"
+                                }`}
                               >
-                                <ExternalLink className="w-3 h-3" />
-                                <span>Launch Console</span>
+                                {tenant.status === "active" ? <PauseCircle className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                               </button>
 
+                              {/* 2. DNS Verification Modal */}
                               <button
                                 onClick={() => {
                                   setSelectedTenantDns(tenant);
                                   setShowDnsModal(true);
                                 }}
-                                title="View Customer DNS Setup Records"
-                                className="p-1 text-[#5f6368] hover:text-[#1a73e8] hover:bg-[#f1f3f4] rounded"
+                                title="View Customer DNS Setup Records (DKIM/SPF)"
+                                className="p-1.5 text-[#5f6368] hover:text-[#1a73e8] hover:bg-[#f1f3f4] rounded transition-colors"
                               >
                                 <Globe className="w-3.5 h-3.5" />
                               </button>
 
+                              {/* 3. Edit Customer Details & Plan */}
                               <button
                                 onClick={() => {
                                   setEditingTenant(tenant);
@@ -666,8 +711,8 @@ export default function SaaSAdminPortal() {
                                   });
                                   setShowTenantModal(true);
                                 }}
-                                title="Edit Customer Details"
-                                className="p-1 text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4] rounded"
+                                title="Edit Customer Account & Plan"
+                                className="p-1.5 text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4] rounded transition-colors"
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
                               </button>
@@ -728,10 +773,10 @@ export default function SaaSAdminPortal() {
                       </div>
 
                       <div className="mt-3 mb-4">
-                        <span className="text-3xl font-extrabold text-[#202124]">${parseFloat(p.price_monthly).toFixed(0)}</span>
+                        <span className="text-3xl font-extrabold text-[#202124]">${Number(p.price_monthly || 29).toFixed(0)}</span>
                         <span className="text-xs text-[#5f6368] font-medium"> / month</span>
                         <div className="text-[11px] text-[#137333] font-semibold mt-1">
-                          {p.email_limit?.toLocaleString()} Dispatches Included
+                          {Number(p.email_limit || 2000).toLocaleString()} Dispatches Included
                         </div>
                       </div>
 

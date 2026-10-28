@@ -533,8 +533,17 @@ export async function GET(req) {
           const plansRes = await client.query("SELECT * FROM plans ORDER BY price_monthly ASC;");
           const dispatchesRes = await client.query("SELECT COUNT(*) FROM email_records;");
 
-          const tenants = tenantsRes.rows;
-          const plans = plansRes.rows;
+          const tenants = tenantsRes.rows.map((t) => ({
+            ...t,
+            monthly_fee: parseFloat(t.monthly_fee) || 29.0,
+            monthly_quota: parseInt(t.monthly_quota, 10) || 2000,
+            used_quota: parseInt(t.used_quota, 10) || 0,
+          }));
+          const plans = plansRes.rows.map((p) => ({
+            ...p,
+            price_monthly: parseFloat(p.price_monthly) || 29.0,
+            email_limit: parseInt(p.email_limit, 10) || 2000,
+          }));
           const totalDispatches = parseInt(dispatchesRes.rows[0]?.count || 0, 10);
 
           // Calculate Financial Metrics
