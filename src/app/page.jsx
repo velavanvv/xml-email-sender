@@ -355,11 +355,18 @@ export default function EnterpriseEmailDashboard() {
 
       const sessionAuth = sessionStorage.getItem("xml_dispatch_auth");
       const localAuth = localStorage.getItem("xml_dispatch_auth");
+      const savedRole = localStorage.getItem("xml_dispatch_role") || sessionStorage.getItem("xml_dispatch_role") || "company_user";
+
+      // Super Admin direct navigation: if admin is already authenticated, go directly to /admin
+      if ((sessionAuth === "true" || localAuth === "true") && savedRole === "administrator") {
+        window.location.replace("/admin");
+        return;
+      }
+
       if (sessionAuth === "true" || localAuth === "true") {
         setIsAuthenticated(true);
       }
 
-      const savedRole = localStorage.getItem("xml_dispatch_role") || sessionStorage.getItem("xml_dispatch_role") || "company_user";
       setUserRole(savedRole);
 
       const savedUser = localStorage.getItem("xml_dispatch_user") || sessionStorage.getItem("xml_dispatch_user") || (savedRole === "administrator" ? "admin@enterprise.internal" : "admin@acmecorp.com");
@@ -374,7 +381,16 @@ export default function EnterpriseEmailDashboard() {
         try {
           const t = JSON.parse(storedTenant);
           setActiveTenant(t);
-          if (t.sender_email) {
+          if (t.smtp_host) {
+            setSmtpSettings({
+              host: t.smtp_host,
+              port: (t.smtp_port || 587).toString(),
+              user: t.smtp_user || "",
+              pass: t.smtp_pass || "",
+              senderEmail: t.smtp_sender_email || t.sender_email || "",
+              senderName: t.smtp_sender_name || t.sender_name || "",
+            });
+          } else if (t.sender_email) {
             setSmtpSettings((prev) => ({
               ...prev,
               senderEmail: t.sender_email,
@@ -405,6 +421,7 @@ export default function EnterpriseEmailDashboard() {
     e?.preventDefault();
     const cleanPass = authPasscode.trim();
     const cleanUser = authUser.trim() || (loginTab === "admin" ? "admin@enterprise.internal" : "admin@acmecorp.com");
+    const isSuperAdminIntent = loginTab === "admin" || cleanUser.toLowerCase().includes("admin@enterprise");
 
     // 1. Check Supabase / Cloud DB via backend authenticate_user action
     try {
@@ -419,35 +436,44 @@ export default function EnterpriseEmailDashboard() {
           authCredentials: {
             email: cleanUser,
             password: cleanPass,
-            expectedRole: loginTab === "admin" ? "administrator" : "company_user",
+            expectedRole: isSuperAdminIntent ? "administrator" : "company_user",
           },
         }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setIsAuthenticated(true);
         setAuthError("");
         const role = data.userType === "super_admin" ? "administrator" : "company_user";
-        setUserRole(role);
 
         const storageTarget = rememberMe ? localStorage : sessionStorage;
         storageTarget.setItem("xml_dispatch_auth", "true");
         storageTarget.setItem("xml_dispatch_user", cleanUser);
         storageTarget.setItem("xml_dispatch_role", role);
 
-        if (data.userType === "super_admin") {
+        // Super Admin: IMMEDIATELY navigate to /admin - NO customer UI flash
+        if (data.userType === "super_admin" || role === "administrator" || isSuperAdminIntent) {
           localStorage.setItem("xml_dispatch_role", "administrator");
-          notify(`Welcome Super Admin. Loading SaaS Administration Portal...`, "success");
-          if (loginTab === "admin") {
-            setTimeout(() => {
-              window.location.href = "/admin";
-            }, 600);
-            return;
-          }
-        } else if (data.tenant) {
+          window.location.replace("/admin");
+          return;
+        }
+
+        // Company Client Login: render customer console
+        setIsAuthenticated(true);
+        setUserRole(role);
+
+        if (data.tenant) {
           setActiveTenant(data.tenant);
           localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(data.tenant));
-          if (data.tenant.sender_email) {
+          if (data.tenant.smtp_host) {
+            setSmtpSettings({
+              host: data.tenant.smtp_host,
+              port: (data.tenant.smtp_port || 587).toString(),
+              user: data.tenant.smtp_user || "",
+              pass: data.tenant.smtp_pass || "",
+              senderEmail: data.tenant.smtp_sender_email || data.tenant.sender_email || "",
+              senderName: data.tenant.smtp_sender_name || data.tenant.sender_name || "",
+            });
+          } else if (data.tenant.sender_email) {
             setSmtpSettings((prev) => ({
               ...prev,
               senderEmail: data.tenant.sender_email,
@@ -467,11 +493,9 @@ export default function EnterpriseEmailDashboard() {
 
     // 2. Master Fallback Authentication
     if (cleanPass === systemPasscode.trim() || cleanPass === "admin123") {
-      setIsAuthenticated(true);
       setAuthError("");
-      const isSuperAdmin = loginTab === "admin" || cleanUser.toLowerCase().includes("admin@enterprise");
+      const isSuperAdmin = isSuperAdminIntent;
       const role = isSuperAdmin ? "administrator" : "company_user";
-      setUserRole(role);
 
       const storageTarget = rememberMe ? localStorage : sessionStorage;
       storageTarget.setItem("xml_dispatch_auth", "true");
@@ -479,32 +503,31 @@ export default function EnterpriseEmailDashboard() {
       storageTarget.setItem("xml_dispatch_role", role);
 
       if (isSuperAdmin) {
-        notify("Authenticated as Platform Super Admin.", "success");
-        if (loginTab === "admin") {
-          setTimeout(() => {
-            window.location.href = "/admin";
-          }, 600);
-          return;
-        }
-      } else {
-        const demoTenant = {
-          id: "tenant_acme",
-          name: "Acme Global Manufacturing",
-          contact_email: cleanUser,
-          sender_email: "invoices@acmecorp.com",
-          sender_name: "Acme Billing Team",
-          plan_id: "plan_standard",
-          monthly_quota: 2000,
-          used_quota: 1420,
-          domain_verified: true,
-          status: "active",
-          monthly_fee: 29.00,
-          subscription_renews_at: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
-        };
-        setActiveTenant(demoTenant);
-        localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(demoTenant));
-        notify(`Welcome ${demoTenant.name}. Signed into Company Console.`, "success");
+        localStorage.setItem("xml_dispatch_role", "administrator");
+        window.location.replace("/admin");
+        return;
       }
+
+      setIsAuthenticated(true);
+      setUserRole(role);
+
+      const demoTenant = {
+        id: "tenant_acme",
+        name: "Acme Global Manufacturing",
+        contact_email: cleanUser,
+        sender_email: "invoices@acmecorp.com",
+        sender_name: "Acme Billing Team",
+        plan_id: "plan_standard",
+        monthly_quota: 2000,
+        used_quota: 1420,
+        domain_verified: true,
+        status: "active",
+        monthly_fee: 29.00,
+        subscription_renews_at: new Date(Date.now() + 28 * 24 * 60 * 60 * 1000).toISOString(),
+      };
+      setActiveTenant(demoTenant);
+      localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(demoTenant));
+      notify(`Welcome ${demoTenant.name}. Signed into Company Console.`, "success");
     } else {
       setAuthError("Invalid credentials. Please verify your password.");
     }
@@ -1484,41 +1507,14 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               </Link>
             )}
 
-            {/* Guide & Domain Verification CTA */}
-            <button
-              onClick={() => setShowGuideModal(true)}
-              title="View Domain Deliverability & Authentication Guide"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#1a73e8] transition-colors"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Deliverability Guide</span>
-            </button>
-
-            {/* Gateway Status Badge */}
-            <button
-              onClick={() => setShowConfigModal(true)}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#3c4043] transition-colors"
-              title="Click to configure email delivery gateway"
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  provider === "simulation"
-                    ? "bg-[#f29900]"
-                    : provider === "mailchimp"
-                    ? "bg-[#1e8e3e]"
-                    : "bg-[#1a73e8]"
-                }`}
-              />
-              <span className="text-[#5f6368]">Gateway:</span>
-              <span className="font-semibold text-[#202124] capitalize">
-                {provider === "simulation"
-                  ? "Standard Gateway"
-                  : provider === "mailchimp"
-                  ? "Mailchimp"
-                  : provider}
+            {/* Customer Verified Sender Info */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md border border-[#dadce0] bg-[#f8f9fa] text-xs">
+              <span className="w-2 h-2 rounded-full bg-[#1e8e3e]" />
+              <span className="text-[#5f6368]">Verified Sender:</span>
+              <span className="font-semibold text-[#202124]">
+                {activeTenant?.sender_email || smtpSettings.senderEmail || "invoices@acmecorp.com"}
               </span>
-              <Settings className="w-3.5 h-3.5 text-[#5f6368] ml-1" />
-            </button>
+            </div>
 
             {/* Download Sample Templates (CSV & XML) */}
             <div className="flex items-center gap-1.5">
@@ -2591,688 +2587,7 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
         </div>
       )}
 
-      {/* ──────────────────────────────────────────────────────────────────────────
-          5. GATEWAY CONFIGURATION MODAL (Google Cloud Console Style)
-      ────────────────────────────────────────────────────────────────────────── */}
-      {showConfigModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#202124]/50 backdrop-blur-xs">
-          <div className="bg-white w-full max-w-xl rounded-lg border border-[#dadce0] shadow-2xl p-6 animate-fade-in">
-            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
-              <div>
-                <h3 className="text-base font-semibold text-[#202124]">Email Delivery Gateway Settings</h3>
-                <p className="text-xs text-[#5f6368]">Configure your transmission vendor, sender domain, and credentials.</p>
-              </div>
-              <button
-                onClick={() => setShowConfigModal(false)}
-                className="p-1 rounded-md text-[#5f6368] hover:bg-[#f1f3f4]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Top Config Tabs */}
-            <div className="flex items-center gap-1 border-b border-[#dadce0] mt-3 pb-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setConfigTab("gateways")}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  configTab === "gateways"
-                    ? "bg-[#1a73e8] text-white"
-                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
-                }`}
-              >
-                Email Gateways
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfigTab("database")}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  configTab === "database"
-                    ? "bg-[#1a73e8] text-white"
-                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
-                }`}
-              >
-                Free Cloud Database
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfigTab("security")}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  configTab === "security"
-                    ? "bg-[#1a73e8] text-white"
-                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
-                }`}
-              >
-                Admin Security
-              </button>
-            </div>
-
-            {/* TAB 1: EMAIL GATEWAYS */}
-            {configTab === "gateways" && (
-              <>
-                {/* Provider Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-4">
-                  {[
-                    { id: "simulation", name: "Simulator", desc: "Zero setup test mode" },
-                    { id: "mailchimp", name: "Mailchimp", desc: "Private domain (Mandrill)" },
-                    { id: "resend", name: "Resend", desc: "Free 3k emails/month" },
-                    { id: "smtp", name: "Custom SMTP", desc: "Gmail / Brevo / Server" },
-                  ].map((p) => {
-                    const isActive = provider === p.id;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setProvider(p.id)}
-                        className={`p-3 rounded-md border text-left transition-all ${
-                          isActive
-                            ? "border-[#1a73e8] bg-[#e8f0fe] text-[#1a73e8]"
-                            : "border-[#dadce0] bg-white text-[#5f6368] hover:bg-[#f8f9fa]"
-                        }`}
-                      >
-                        <div className="text-xs font-semibold text-[#202124]">{p.name}</div>
-                        <div className="text-[11px] text-[#5f6368] mt-0.5 leading-tight">{p.desc}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-            {/* Simulation Tab */}
-            {provider === "simulation" && (
-              <div className="p-3.5 rounded-md bg-[#fef7e0] border border-[#feefc3] text-xs text-[#8a5700] space-y-1">
-                <div className="font-semibold flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-[#f29900]" />
-                  <span>Sandbox Simulator Active</span>
-                </div>
-                <p>
-                  No external API credentials required. Safely test XML file ingestion, common templates, and batch sending. Records will transition realistically to <strong>Delivered</strong> with zero cost.
-                </p>
-              </div>
-            )}
-
-            {/* Mailchimp Tab */}
-            {provider === "mailchimp" && (
-              <div className="space-y-3.5 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
-                <div className="font-semibold text-[#202124] flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-[#1e8e3e]" />
-                  <span>Mailchimp Transactional (Mandrill) with Private Domain</span>
-                </div>
-
-                <div>
-                  <label className="block text-[#202124] font-medium mb-1">
-                    Mailchimp Mandrill API Key <span className="text-[#d93025]">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showMailchimpKey ? "text" : "password"}
-                      value={mailchimpApiKey}
-                      onChange={(e) => setMailchimpApiKey(e.target.value)}
-                      placeholder="md-••••••••••••••••••••••••"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] font-mono pr-9 focus:outline-none focus:border-[#1a73e8]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowMailchimpKey(!showMailchimpKey)}
-                      className="absolute right-2.5 top-2.5 text-[#80868b] hover:text-[#202124] transition-colors"
-                    >
-                      {showMailchimpKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <span className="text-[11px] text-[#5f6368] mt-1 block">
-                    Found in Mandrill Dashboard &gt; Settings &gt; API Keys.
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#202124] font-medium mb-1">
-                      Private Domain Sender Email <span className="text-[#d93025]">*</span>
-                    </label>
-                    <input
-                      type="email"
-                      value={mailchimpFromEmail}
-                      onChange={(e) => setMailchimpFromEmail(e.target.value)}
-                      placeholder="billing@yourdomain.com"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#202124] font-medium mb-1">Sender Name</label>
-                    <input
-                      type="text"
-                      value={mailchimpFromName}
-                      onChange={(e) => setMailchimpFromName(e.target.value)}
-                      placeholder="e.g. Accounts Department"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-md bg-white border border-[#dadce0] text-[11px] text-[#5f6368] space-y-1">
-                  <span className="font-semibold text-[#202124]">Domain Deliverability Requirements:</span>
-                  <ul className="list-disc list-inside space-y-0.5">
-                    <li>Verify your domain in Mailchimp &gt; Sending Domains</li>
-                    <li>Add the 2 TXT DNS records (SPF &amp; DKIM) on your domain registrar</li>
-                  </ul>
-                </div>
-              </div>
-            )}
-
-            {/* Resend Tab */}
-            {provider === "resend" && (
-              <div className="space-y-3.5 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
-                <div>
-                  <label className="block text-[#202124] font-medium mb-1">
-                    Resend API Key <span className="text-[#d93025]">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showResendKey ? "text" : "password"}
-                      value={resendKey}
-                      onChange={(e) => setResendKey(e.target.value)}
-                      placeholder="re_••••••••••••••••••••••••"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] font-mono pr-9 focus:outline-none focus:border-[#1a73e8]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowResendKey(!showResendKey)}
-                      className="absolute right-2.5 top-2.5 text-[#80868b] hover:text-[#202124] transition-colors"
-                    >
-                      {showResendKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[#202124] font-medium mb-1">From Sender Address</label>
-                  <input
-                    type="text"
-                    value={resendFromEmail}
-                    onChange={(e) => setResendFromEmail(e.target.value)}
-                    placeholder="onboarding@resend.dev or alerts@yourdomain.com"
-                    className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
-                  />
-                  <div className="p-2.5 mt-2 rounded bg-[#fef7e0] border border-[#feefc3] text-[#8a5700] text-[11px] space-y-1">
-                    <p className="font-semibold">Resend 403 Security Rule:</p>
-                    <p>
-                      <code>onboarding@resend.dev</code> only delivers to the exact email used to register Resend. To send to any client inbox, verify a domain in Resend or use Gmail/Mailchimp.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* SMTP Tab */}
-            {provider === "smtp" && (
-              <div className="space-y-3.5 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#202124] font-medium mb-1">SMTP Host</label>
-                    <input
-                      type="text"
-                      value={smtpSettings.host}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, host: e.target.value.trim() })}
-                      placeholder="smtp-relay.brevo.com"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#202124] font-medium mb-1">Port</label>
-                    <input
-                      type="text"
-                      value={smtpSettings.port}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, port: e.target.value.trim() })}
-                      placeholder="587"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[#202124] font-medium mb-1">SMTP Username / Login</label>
-                  <input
-                    type="text"
-                    value={smtpSettings.user}
-                    onChange={(e) => setSmtpSettings({ ...smtpSettings, user: e.target.value.trim() })}
-                    placeholder="c03022001@smtp-brevo.com"
-                    className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[#202124] font-medium mb-1">SMTP Key / Password</label>
-                  <div className="relative">
-                    <input
-                      type={showSmtpPass ? "text" : "password"}
-                      value={smtpSettings.pass}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, pass: e.target.value.trim() })}
-                      placeholder="xsmtpsib-••••••••••••••••"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124] pr-9 font-mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowSmtpPass(!showSmtpPass)}
-                      className="absolute right-2.5 top-2 text-[#80868b] hover:text-[#202124] transition-colors"
-                    >
-                      {showSmtpPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-1 border-t border-[#dadce0]">
-                  <div>
-                    <label className="block text-[#202124] font-medium mb-1">
-                      Sender Email (From Address)
-                    </label>
-                    <input
-                      type="email"
-                      value={smtpSettings.senderEmail || ""}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, senderEmail: e.target.value.trim() })}
-                      placeholder="velavanvelavan790@gmail.com"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
-                    />
-                    <p className="text-[10px] text-[#5f6368] mt-0.5">
-                      Must match verified Brevo sender to reach Inbox directly.
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-[#202124] font-medium mb-1">
-                      Sender Name
-                    </label>
-                    <input
-                      type="text"
-                      value={smtpSettings.senderName || ""}
-                      onChange={(e) => setSmtpSettings({ ...smtpSettings, senderName: e.target.value })}
-                      placeholder="CloudMail Team"
-                      className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-1.5 text-xs text-[#202124]"
-                    />
-                    <p className="text-[10px] text-[#5f6368] mt-0.5">
-                      Display name shown to recipient.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="pt-1 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={handleTestSmtp}
-                    disabled={isTestingSmtp || !smtpSettings.user || !smtpSettings.pass}
-                    className="px-3.5 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] disabled:opacity-50 text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingSmtp ? "animate-spin" : ""}`} />
-                    <span>{isTestingSmtp ? "Testing Relay..." : "⚡ Test SMTP Connection"}</span>
-                  </button>
-
-                  <span className="text-[11px] text-[#5f6368]">
-                    Brevo / Gmail / Custom Relay
-                  </span>
-                </div>
-
-                {/* SMTP Test Feedback Banner */}
-                {smtpTestResult && (
-                  <div
-                    className={`p-2.5 rounded-md text-[11px] flex items-start gap-2 ${
-                      smtpTestResult.success
-                        ? "bg-[#e6f4ea] text-[#137333] border border-[#ceead6]"
-                        : "bg-[#fce8e6] text-[#c5221f] border border-[#fad2cf]"
-                    }`}
-                  >
-                    {smtpTestResult.success ? (
-                      <CheckCircle className="w-4 h-4 shrink-0 text-[#1e8e3e] mt-0.5" />
-                    ) : (
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-[#d93025] mt-0.5" />
-                    )}
-                    <div className="space-y-0.5">
-                      <p className="font-semibold">{smtpTestResult.message}</p>
-                      {smtpTestResult.suggestion && (
-                        <p className="text-[10px] text-[#5f6368]">{smtpTestResult.suggestion}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* TAB 2: ENTERPRISE CLOUD STORAGE & DATABASE */}
-        {configTab === "database" && (
-          <div className="space-y-4 my-4 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
-            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
-              <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-[#1a73e8]" />
-                <div>
-                  <h4 className="font-semibold text-[#202124]">Enterprise Cloud Storage &amp; Database Sync</h4>
-                  <p className="text-[11px] text-[#5f6368]">Persistent database synchronization for batch recipient dispatches and deliverability logs.</p>
-                </div>
-              </div>
-              {customDbUrl ? (
-                <span className="px-2.5 py-1 rounded-full bg-[#e6f4ea] text-[#1e8e3e] border border-[#ceead6] font-semibold text-[11px] flex items-center gap-1">
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  <span>PostgreSQL Configured</span>
-                </span>
-              ) : (
-                <span className="px-2.5 py-1 rounded-full bg-[#e8f0fe] text-[#1a73e8] border border-[#d2e3fc] font-semibold text-[11px] flex items-center gap-1">
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  <span>Internal Cloud Storage: Active</span>
-                </span>
-              )}
-            </div>
-
-            {/* Supabase / PostgreSQL Connection Input */}
-            <div className="space-y-2 bg-white p-3.5 rounded-lg border border-[#dadce0]">
-              <div className="flex items-center justify-between">
-                <label className="font-medium text-[#202124] flex items-center gap-1.5">
-                  <Server className="w-3.5 h-3.5 text-[#1a73e8]" />
-                  <span>Database Connection URI</span>
-                </label>
-                <a
-                  href="https://supabase.com/dashboard/project/_/settings/database"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[#1a73e8] hover:underline text-[11px] inline-flex items-center gap-1"
-                >
-                  <span>Supabase Settings</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-              <p className="text-[11px] text-[#5f6368]">
-                Provide your PostgreSQL connection pooling URI (Connection Pooling Session mode, port 6543/5432):
-              </p>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={showDbUri ? "text" : "password"}
-                    value={customDbUrl}
-                    onChange={(e) => handleSaveDbUrl(e.target.value)}
-                    placeholder="postgresql://user:••••••••@aws-0-region.pooler.supabase.com:6543/postgres?sslmode=require"
-                    className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded-md px-3 py-2 text-xs font-mono text-[#202124] pr-9 focus:bg-white focus:outline-none focus:border-[#1a73e8]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowDbUri(!showDbUri)}
-                    className="absolute right-2.5 top-2.5 text-[#80868b] hover:text-[#202124] transition-colors"
-                  >
-                    {showDbUri ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleInitSupabaseTable}
-                  disabled={isCreatingTable || !customDbUrl.trim()}
-                  className="px-3.5 py-2 bg-[#1e8e3e] hover:bg-[#188038] disabled:opacity-50 text-white rounded text-xs font-medium inline-flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors shadow-xs cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isCreatingTable ? "animate-spin" : ""}`} />
-                  <span>{isCreatingTable ? "Verifying..." : "⚡ Verify & Init Database"}</span>
-                </button>
-                {customDbUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleSaveDbUrl("");
-                      setDbConnectionStatus(null);
-                      setCloudDbStatus("Connected");
-                      notify("Custom database credentials cleared. Switched to internal cloud storage.", "info");
-                    }}
-                    className="px-2.5 py-2 bg-white hover:bg-[#f1f3f4] text-[#d93025] border border-[#dadce0] rounded text-xs font-medium inline-flex items-center justify-center gap-1 whitespace-nowrap transition-colors cursor-pointer"
-                    title="Clear connection URI"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Clear</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Instant IPv6 Direct Host Warning */}
-              {customDbUrl.includes("db.") && customDbUrl.includes(".supabase.co") && (
-                <div className="p-3 bg-[#fef7e0] border border-[#f9ab00] rounded-md text-xs text-[#202124] space-y-1.5">
-                  <p className="font-semibold text-[#b06000] flex items-center gap-1.5">
-                    <AlertTriangle className="w-4 h-4 text-[#e37400] shrink-0" />
-                    <span>Direct Supabase Host Detected (db.[ref].supabase.co)</span>
-                  </p>
-                  <p className="text-[11px] text-[#5f6368] leading-relaxed">
-                    Direct Supabase connections are <strong>IPv6-only</strong> and fail on Vercel with <code>getaddrinfo ENOTFOUND</code>.
-                  </p>
-                  <div className="text-[11px] bg-white p-2.5 rounded border border-[#f9ab00]/30 font-sans space-y-1 text-[#202124]">
-                    <div className="font-medium text-[#1a73e8]">How to fix in 10 seconds:</div>
-                    <ol className="list-decimal pl-4 space-y-0.5 text-[#5f6368]">
-                      <li>Open Supabase Dashboard &rarr; <strong>Project Settings (⚙️)</strong> &rarr; <strong>Database</strong>.</li>
-                      <li>Scroll to <strong>Connection string</strong> &rarr; switch Method to <strong>Connection pooling</strong>.</li>
-                      <li>Copy the Pooler URI (starts with <code className="text-[#202124] bg-[#f1f3f4] px-1 py-0.5 rounded">postgresql://postgres.[ref]:...pooler.supabase.com:6543</code>) and paste it here.</li>
-                    </ol>
-                  </div>
-                </div>
-              )}
-
-              {/* Status Alert Banner */}
-              {dbConnectionStatus && (
-                <div
-                  className={`p-3 rounded-md text-[11px] space-y-2 ${
-                    dbConnectionStatus.success
-                      ? "bg-[#e6f4ea] text-[#137333] border border-[#ceead6]"
-                      : "bg-[#fce8e6] text-[#c5221f] border border-[#fad2cf]"
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    {dbConnectionStatus.success ? (
-                      <CheckCircle className="w-4 h-4 shrink-0 text-[#1e8e3e] mt-0.5" />
-                    ) : (
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-[#d93025] mt-0.5" />
-                    )}
-                    <div className="space-y-0.5">
-                      <strong>{dbConnectionStatus.success ? "Status: Connected & Operational" : "Connection Notice:"}</strong>
-                      <p>{dbConnectionStatus.message}</p>
-                    </div>
-                  </div>
-
-                  {dbConnectionStatus.tables && (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-[#ceead6]">
-                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
-                        <div className="font-semibold text-[#137333] font-mono text-[10px]">email_records</div>
-                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.email_records} dispatches</div>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
-                        <div className="font-semibold text-[#137333] font-mono text-[10px]">smtp_configurations</div>
-                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.smtp_configurations} active config</div>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
-                        <div className="font-semibold text-[#137333] font-mono text-[10px]">email_configurations</div>
-                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.email_configurations} settings row</div>
-                      </div>
-                      <div className="bg-white p-2 rounded border border-[#ceead6] shadow-2xs">
-                        <div className="font-semibold text-[#137333] font-mono text-[10px]">users</div>
-                        <div className="text-[#5f6368] text-[10px]">{dbConnectionStatus.tables.users} operator account</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Storage Maintenance & Sync Controls */}
-            <div className="p-3.5 bg-white border border-[#dadce0] rounded-md space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-[#202124] flex items-center gap-1.5">
-                  <HardDrive className="w-4 h-4 text-[#1a73e8]" />
-                  <span>Storage Maintenance</span>
-                </span>
-                <span className="text-[#1a73e8] font-mono text-[11px]">{records.length} records in active memory</span>
-              </div>
-              {lastSyncedTime && (
-                <p className="text-[11px] text-[#5f6368]">Last synchronized: <strong>{lastSyncedTime}</strong></p>
-              )}
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={syncToCloudDb}
-                  disabled={isSyncingDb}
-                  className="px-3 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDb ? "animate-spin" : ""}`} />
-                  <span>Sync Storage Now</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={loadFromCloudDb}
-                  disabled={isSyncingDb}
-                  className="px-3 py-1.5 bg-white border border-[#dadce0] hover:bg-[#f1f3f4] text-[#3c4043] rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-[#5f6368]" />
-                  <span>Reload Records</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(records, null, 2));
-                    const dl = document.createElement("a");
-                    dl.setAttribute("href", dataStr);
-                    dl.setAttribute("download", `dispatch_backup_${new Date().toISOString().slice(0, 10)}.json`);
-                    dl.click();
-                    notify("Backup exported successfully.", "success");
-                  }}
-                  className="px-3 py-1.5 bg-white border border-[#dadce0] hover:bg-[#f1f3f4] text-[#3c4043] rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5 text-[#5f6368]" />
-                  <span>Export JSON Backup</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Collapsible Advanced SQL Schema Section */}
-            <div className="border border-[#dadce0] rounded-md bg-white overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setShowSqlSchema(!showSqlSchema)}
-                className="w-full p-3 flex items-center justify-between text-left hover:bg-[#f8f9fa] transition-colors cursor-pointer"
-              >
-                <span className="font-medium text-[#202124] flex items-center gap-1.5 text-xs">
-                  <FileCode className="w-4 h-4 text-[#1a73e8]" />
-                  <span>Advanced Database Migration Schema (Optional)</span>
-                </span>
-                <ChevronDown className={`w-4 h-4 text-[#5f6368] transition-transform ${showSqlSchema ? "rotate-180" : ""}`} />
-              </button>
-              {showSqlSchema && (
-                <div className="p-3.5 border-t border-[#dadce0] bg-[#f8f9fa] space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-[#5f6368]">
-                      Run this script in your Supabase SQL Editor if you prefer manual table creation:
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleCopySql}
-                      className="px-2.5 py-1 bg-white hover:bg-[#f1f3f4] text-[#202124] border border-[#dadce0] rounded text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      {sqlCopied ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-[#1e8e3e]" />
-                          <span className="text-[#1e8e3e] font-semibold">Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5 text-[#5f6368]" />
-                          <span>Copy SQL</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <pre className="p-2.5 bg-[#202124] text-[#e8eaed] font-mono text-[10px] rounded-md overflow-x-auto leading-relaxed border border-[#3c4043]">
-                    {SUPABASE_SQL_SCHEMA}
-                  </pre>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: ADMIN SECURITY */}
-        {configTab === "security" && (
-          <div className="space-y-4 my-4 text-xs bg-[#f8f9fa] p-4 rounded-md border border-[#dadce0]">
-            <div className="flex items-center gap-2 pb-3 border-b border-[#dadce0]">
-              <ShieldCheck className="w-5 h-5 text-[#1a73e8]" />
-              <div>
-                <h4 className="font-semibold text-[#202124]">Security Access &amp; Passcode Settings</h4>
-                <p className="text-[11px] text-[#5f6368]">Configure the workspace passcode required to unlock the dispatcher console.</p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[#202124] font-medium mb-1">
-                  Administrator Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPasscode ? "text" : "password"}
-                    value={systemPasscode}
-                    onChange={(e) => {
-                      setSystemPasscode(e.target.value);
-                      localStorage.setItem("xml_dispatch_passcode", e.target.value);
-                    }}
-                    className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs font-mono text-[#202124] pr-9 focus:outline-none focus:border-[#1a73e8]"
-                    placeholder="Enter new administrator password..."
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPasscode(!showPasscode)}
-                    className="absolute right-2.5 top-2.5 text-[#80868b] hover:text-[#202124] transition-colors"
-                  >
-                    {showPasscode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="text-[11px] text-[#5f6368] mt-1">Changes take effect immediately across all sessions.</p>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleLogout();
-                    setShowConfigModal(false);
-                  }}
-                  className="px-3 py-1.5 bg-[#c5221f] hover:bg-[#a51d24] text-white rounded text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>Lock Workspace Console Now</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-            {/* Modal Actions */}
-            <div className="flex justify-end gap-2 mt-5 pt-3 border-t border-[#dadce0]">
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    localStorage.setItem(
-                      "xml_dispatch_config",
-                      JSON.stringify({
-                        provider,
-                        resendKey,
-                        resendFromEmail,
-                        mailchimpApiKey,
-                        mailchimpFromEmail,
-                        mailchimpFromName,
-                        smtpSettings,
-                      })
-                    );
-                  } catch (e) {
-                    console.warn(e);
-                  }
-                  await saveBackendConfiguration();
-                  setShowConfigModal(false);
-                }}
-                className="btn-google-primary"
-              >
-                Save Configuration
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ──────────────────────────────────────────────────────────────────────────
+            {/* ──────────────────────────────────────────────────────────────────────────
           6. PREVIEW RECORD MODAL
       ────────────────────────────────────────────────────────────────────────── */}
       {previewRecord && (
@@ -3335,276 +2650,6 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Send This Email Now</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ──────────────────────────────────────────────────────────────────────────
-          7. DOMAIN VERIFICATION & EMAIL CREDITS OPERATIONAL GUIDE MODAL
-      ────────────────────────────────────────────────────────────────────────── */}
-      {showGuideModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#202124]/50 backdrop-blur-xs">
-          <div className="bg-white w-full max-w-2xl rounded-xl border border-[#dadce0] shadow-2xl p-6 animate-fade-in text-xs max-h-[90vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-md bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center shrink-0">
-                  <BookOpen className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-[#202124]">Domain Verification &amp; Credits Guide</h3>
-                  <p className="text-[11px] text-[#5f6368]">Step-by-step procedures to verify private domains and acquire sending credits.</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowGuideModal(false)}
-                className="p-1 rounded-md text-[#5f6368] hover:bg-[#f1f3f4]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Navigation Tabs */}
-            <div className="flex items-center gap-2 border-b border-[#dadce0] pt-3 pb-2">
-              <button
-                type="button"
-                onClick={() => setGuideTab("verification")}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  guideTab === "verification"
-                    ? "bg-[#1a73e8] text-white"
-                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
-                }`}
-              >
-                DNS &amp; Domain Verification
-              </button>
-              <button
-                type="button"
-                onClick={() => setGuideTab("credits")}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  guideTab === "credits"
-                    ? "bg-[#1a73e8] text-white"
-                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
-                }`}
-              >
-                Credits &amp; Gateway Pricing
-              </button>
-              <button
-                type="button"
-                onClick={() => setGuideTab("database")}
-                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                  guideTab === "database"
-                    ? "bg-[#1a73e8] text-white"
-                    : "text-[#5f6368] hover:bg-[#f1f3f4]"
-                }`}
-              >
-                Free Hosted DB Setup
-              </button>
-            </div>
-
-            {/* Modal Body (Scrollable) */}
-            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1 text-[#3c4043] leading-relaxed">
-              {/* TAB 1: DOMAIN VERIFICATION */}
-              {guideTab === "verification" && (
-                <div className="space-y-4">
-                  <div className="p-3 bg-[#e8f0fe] border border-[#d2e3fc] rounded-lg">
-                    <h4 className="font-semibold text-[#1a73e8] flex items-center gap-1.5 text-xs">
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Why Must Domains Be Verified?</span>
-                    </h4>
-                    <p className="text-[11px] text-[#202124] mt-1">
-                      Email providers (Gmail, Outlook, Yahoo) require cryptographic DNS verification so malicious parties cannot forge your company identity. A verified domain guarantees high inbox placement and bypasses spam filters.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#202124]">Step 1: Add DKIM Record (DomainKeys Identified Mail)</span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">CNAME / TXT</span>
-                      </div>
-                      <p className="text-[11px] text-[#5f6368]">
-                        Sign in to your domain registrar (GoDaddy, Namecheap, Cloudflare) &rarr; DNS Management &rarr; Add Record:
-                      </p>
-                      <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
-                        <div><strong>Type:</strong> TXT or CNAME</div>
-                        <div><strong>Name / Host:</strong> <span className="text-[#1a73e8]">k1._domainkey.yourdomain.com</span></div>
-                        <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3D...</span></div>
-                      </div>
-                    </div>
-
-                    <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#202124]">Step 2: Add SPF Record (Sender Policy Framework)</span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">TXT</span>
-                      </div>
-                      <p className="text-[11px] text-[#5f6368]">
-                        Authorizes your sending vendor to dispatch on behalf of your domain:
-                      </p>
-                      <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
-                        <div><strong>Type:</strong> TXT</div>
-                        <div><strong>Host:</strong> @ (or yourdomain.com)</div>
-                        <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=spf1 include:servers.mcsv.net include:resend.com ~all</span></div>
-                      </div>
-                    </div>
-
-                    <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#202124]">Step 3: Add DMARC Policy</span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">TXT</span>
-                      </div>
-                      <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
-                        <div><strong>Host:</strong> <span className="text-[#1a73e8]">_dmarc.yourdomain.com</span></div>
-                        <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=DMARC1; p=none; rua=mailto:dmarc@yourdomain.com</span></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: CREDITS & PRICING */}
-              {guideTab === "credits" && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                    {/* Mailchimp */}
-                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#202124] text-sm">Mailchimp (Mandrill)</span>
-                        <span className="text-[10px] font-semibold text-[#1e8e3e] bg-[#e6f4ea] px-2 py-0.5 rounded">Enterprise Tier</span>
-                      </div>
-                      <p className="text-[11px] text-[#5f6368]">
-                        Best for enterprise private domains requiring dedicated reputation protection.
-                      </p>
-                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
-                        <div><strong>Pricing:</strong> $20 / month per block of <strong>25,000 emails</strong> ($0.0008 / email).</div>
-                        <div><strong>Prerequisite:</strong> Standard Mailchimp monthly plan ($13 - $20/mo).</div>
-                        <div><strong>How to get:</strong> Mailchimp Dashboard &rarr; Profile &rarr; Transactional Email &rarr; Buy Blocks.</div>
-                      </div>
-                    </div>
-
-                    {/* Resend */}
-                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#202124] text-sm">Resend API</span>
-                        <span className="text-[10px] font-semibold text-[#1a73e8] bg-[#e8f0fe] px-2 py-0.5 rounded">Fastest Setup</span>
-                      </div>
-                      <p className="text-[11px] text-[#5f6368]">
-                        Ultra-modern developer gateway with live deliverability analytics and fast DNS checks.
-                      </p>
-                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
-                        <div><strong>Free Tier:</strong> <strong>3,000 emails / month</strong> free forever (100 / day).</div>
-                        <div><strong>Pro Tier:</strong> $20 / month for <strong>50,000 emails</strong> ($0.0004 / email).</div>
-                        <div><strong>How to get:</strong> Sign up at <a href="https://resend.com" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline">resend.com</a> &rarr; Domains &rarr; Add Domain &rarr; API Keys.</div>
-                      </div>
-                    </div>
-
-                    {/* Brevo */}
-                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#202124] text-sm">Brevo (Sendinblue)</span>
-                        <span className="text-[10px] font-semibold text-[#f29900] bg-[#fef7e0] px-2 py-0.5 rounded">High Free Daily</span>
-                      </div>
-                      <p className="text-[11px] text-[#5f6368]">
-                        Free SMTP relay server with generous daily allotment.
-                      </p>
-                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
-                        <div><strong>Free Tier:</strong> <strong>300 emails / day</strong> forever (9,000 emails / month free).</div>
-                        <div><strong>Starter Tier:</strong> $9 / month for 5,000 emails.</div>
-                        <div><strong>How to get:</strong> Sign up at <a href="https://brevo.com" target="_blank" rel="noreferrer" className="text-[#1a73e8] underline">brevo.com</a> &rarr; SMTP &amp; API credentials.</div>
-                      </div>
-                    </div>
-
-                    {/* Google Workspace */}
-                    <div className="p-4 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#202124] text-sm">Google Workspace SMTP</span>
-                        <span className="text-[10px] font-semibold text-[#5f6368] bg-[#f1f3f4] px-2 py-0.5 rounded">Included in Google</span>
-                      </div>
-                      <p className="text-[11px] text-[#5f6368]">
-                        Use your existing company Google Workspace account without buying extra credits.
-                      </p>
-                      <div className="border-t border-[#f1f3f4] pt-2 space-y-1 text-[11px]">
-                        <div><strong>Capacity:</strong> <strong>2,000 emails / day</strong> per paid user account.</div>
-                        <div><strong>How to get:</strong> Google Account &rarr; Security &rarr; 2-Step Verification &rarr; App Passwords &rarr; Generate 16-digit password.</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: FREE HOSTED DB */}
-              {guideTab === "database" && (
-                <div className="space-y-4">
-                  <div className="p-3.5 bg-white border border-[#dadce0] rounded-lg space-y-2">
-                    <h4 className="font-semibold text-[#202124] flex items-center gap-1.5">
-                      <Database className="w-4 h-4 text-[#1a73e8]" />
-                      <span>Free Hosted PostgreSQL Database Setup (Supabase)</span>
-                    </h4>
-                    <p className="text-[11px] text-[#5f6368]">
-                      Follow these 3 quick steps to initialize your free database table in Supabase:
-                    </p>
-
-                    <div className="space-y-2 pt-1 text-[11px]">
-                      <div className="p-2.5 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
-                        <strong className="text-[#202124]">Step 1: Get Connection URI from Supabase</strong>
-                        <p className="text-[#5f6368]">
-                          Go to <strong>supabase.com &rarr; Project Settings &rarr; Database &rarr; Connection string (URI)</strong> and copy the connection string.
-                        </p>
-                      </div>
-
-                      <div className="p-2.5 bg-[#f8f9fa] border border-[#dadce0] rounded-md space-y-1">
-                        <strong className="text-[#202124]">Step 2: Auto-Create Table or Run SQL</strong>
-                        <p className="text-[#5f6368]">
-                          Open <strong>Settings &rarr; Database Tab</strong> in this app, paste your URI, and click <strong>&quot;⚡ Auto-Create Table in Supabase&quot;</strong>. Or run the SQL script below directly in Supabase SQL Editor.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* SQL Box */}
-                    <div className="pt-2">
-                      <div className="flex items-center justify-between pb-1">
-                        <span className="font-semibold text-[#202124] text-[11px]">Supabase SQL Editor Schema:</span>
-                        <button
-                          type="button"
-                          onClick={handleCopySql}
-                          className="px-2.5 py-1 bg-[#f1f3f4] hover:bg-[#e8eaed] text-[#202124] border border-[#dadce0] rounded text-[11px] font-medium inline-flex items-center gap-1 transition-colors"
-                        >
-                          {sqlCopied ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-[#1e8e3e]" />
-                              <span className="text-[#1e8e3e] font-semibold">Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5 text-[#5f6368]" />
-                              <span>Copy SQL</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                      <pre className="p-2.5 bg-[#202124] text-[#e8eaed] font-mono text-[10px] rounded-md overflow-x-auto leading-relaxed border border-[#3c4043]">
-                        {SUPABASE_SQL_SCHEMA}
-                      </pre>
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-[#e8f0fe] border border-[#d2e3fc] rounded-lg text-[#1a73e8] text-[11px] space-y-1">
-                    <strong>Quick Test:</strong> After running the SQL or linking your connection string, click <code className="bg-white px-1 py-0.5 rounded font-mono text-[#1a73e8] border border-[#dadce0]">Push Records to Database</code> to store all recipient records instantly.
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="pt-3 border-t border-[#dadce0] flex items-center justify-between">
-              <span className="text-[11px] text-[#70757a]">Documentation standard &bull; CloudMail XML</span>
-              <button
-                type="button"
-                onClick={() => setShowGuideModal(false)}
-                className="btn-google-primary"
-              >
-                Got It, Return to Console
               </button>
             </div>
           </div>

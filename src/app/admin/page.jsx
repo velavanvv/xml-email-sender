@@ -31,6 +31,12 @@ import {
   LogOut,
   PauseCircle,
   Play,
+  BookOpen,
+  Sliders,
+  X,
+  Eye,
+  EyeOff,
+  Send,
 } from "lucide-react";
 
 export default function SaaSAdminPortal() {
@@ -77,6 +83,26 @@ export default function SaaSAdminPortal() {
   const [showDnsModal, setShowDnsModal] = useState(false);
   const [selectedTenantDns, setSelectedTenantDns] = useState(null);
   const [copiedKey, setCopiedKey] = useState("");
+
+  // Deliverability & DNS Architecture Guide Modal
+  const [showDeliverabilityModal, setShowDeliverabilityModal] = useState(false);
+  const [deliverabilityTab, setDeliverabilityTab] = useState("overview");
+
+  // Per-Customer Email Gateway Configuration Modal
+  const [showGatewayModal, setShowGatewayModal] = useState(false);
+  const [selectedTenantGateway, setSelectedTenantGateway] = useState(null);
+  const [gatewayForm, setGatewayForm] = useState({
+    host: "smtp-relay.brevo.com",
+    port: "587",
+    user: "c03022001@smtp-brevo.com",
+    pass: "",
+    senderEmail: "",
+    senderName: "",
+    provider: "smtp",
+  });
+  const [isTestingGateway, setIsTestingGateway] = useState(false);
+  const [gatewayTestResult, setGatewayTestResult] = useState(null);
+  const [showGatewayPass, setShowGatewayPass] = useState(false);
 
   // Edit Plan Modal
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -256,6 +282,104 @@ export default function SaaSAdminPortal() {
     }
   };
 
+  // Open Gateway Configuration Modal for Specific Customer
+  const handleOpenGatewayModal = (tenant) => {
+    setSelectedTenantGateway(tenant);
+    setGatewayForm({
+      host: tenant.smtp_host || "smtp-relay.brevo.com",
+      port: (tenant.smtp_port || 587).toString(),
+      user: tenant.smtp_user || "c03022001@smtp-brevo.com",
+      pass: tenant.smtp_pass || "",
+      senderEmail: tenant.smtp_sender_email || tenant.sender_email || "",
+      senderName: tenant.smtp_sender_name || tenant.sender_name || "Accounts Dept",
+      provider: tenant.gateway_provider || "smtp",
+    });
+    setGatewayTestResult(null);
+    setShowGatewayModal(true);
+  };
+
+  // Test Customer Gateway Connection (Live SMTP handshake via /api/send)
+  const handleTestGateway = async () => {
+    if (!gatewayForm.host || !gatewayForm.user || !gatewayForm.pass) {
+      notify("Please provide SMTP Host, Username and Password to test connection.", "error");
+      return;
+    }
+    setIsTestingGateway(true);
+    setGatewayTestResult(null);
+    try {
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "test_smtp",
+          smtpConfig: {
+            host: gatewayForm.host.trim(),
+            port: gatewayForm.port.trim(),
+            user: gatewayForm.user.trim(),
+            pass: gatewayForm.pass.trim(),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setGatewayTestResult({ success: true, message: data.message });
+        notify("✅ Gateway connection verified successfully!", "success");
+      } else {
+        setGatewayTestResult({ success: false, message: data.error, suggestion: data.suggestion });
+        notify(data.error || "Gateway verification failed", "error");
+      }
+    } catch (err) {
+      setGatewayTestResult({ success: false, message: err.message });
+      notify("Gateway connection error: " + err.message, "error");
+    } finally {
+      setIsTestingGateway(false);
+    }
+  };
+
+  // Save Gateway Directly to Supabase for this Customer
+  const handleSaveCustomerGateway = async (e) => {
+    e?.preventDefault();
+    if (!selectedTenantGateway) return;
+    setIsSaving(true);
+    try {
+      const updatedTenant = {
+        ...selectedTenantGateway,
+        smtp_host: gatewayForm.host.trim(),
+        smtp_port: parseInt(gatewayForm.port || 587, 10),
+        smtp_user: gatewayForm.user.trim(),
+        smtp_pass: gatewayForm.pass.trim(),
+        smtp_sender_email: gatewayForm.senderEmail.trim() || selectedTenantGateway.sender_email,
+        smtp_sender_name: gatewayForm.senderName.trim() || selectedTenantGateway.sender_name,
+        gateway_provider: gatewayForm.provider,
+      };
+
+      const headers = { "Content-Type": "application/json" };
+      if (customDbUrl.trim()) headers["x-database-url"] = customDbUrl.trim();
+
+      const res = await fetch("/api/db", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "create_tenant",
+          connectionString: customDbUrl.trim() || undefined,
+          tenant: updatedTenant,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notify(`Email Gateway saved to Supabase for '${selectedTenantGateway.name}'!`, "success");
+        setShowGatewayModal(false);
+        loadAdminData();
+      } else {
+        notify(data.error || "Failed to persist gateway settings.", "error");
+      }
+    } catch (err) {
+      notify("Network error saving gateway: " + err.message, "error");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Filter Tenants
   const filteredTenants = tenants.filter((t) => {
     const matchesSearch =
@@ -355,6 +479,16 @@ export default function SaaSAdminPortal() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            {/* Deliverability & DNS Authentication Guide */}
+            <button
+              onClick={() => setShowDeliverabilityModal(true)}
+              className="px-3 py-1.5 bg-[#e8f0fe] border border-[#d2e3fc] hover:bg-[#d2e3fc] text-[#1a73e8] rounded text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Deliverability, SPF, DKIM, DMARC & IP Warming Guide"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Deliverability Guide</span>
+            </button>
+
             <button
               onClick={loadAdminData}
               disabled={loading}
@@ -571,6 +705,7 @@ export default function SaaSAdminPortal() {
                     <th className="py-2.5 px-3.5">Company &amp; Tenant ID</th>
                     <th className="py-2.5 px-3.5">Assigned Plan</th>
                     <th className="py-2.5 px-3.5">Verified Sender Domain</th>
+                    <th className="py-2.5 px-3.5">Email Gateway</th>
                     <th className="py-2.5 px-3.5">Monthly Quota Meter</th>
                     <th className="py-2.5 px-3.5">Monthly Fee</th>
                     <th className="py-2.5 px-3.5">Status</th>
@@ -625,6 +760,29 @@ export default function SaaSAdminPortal() {
                                 <AlertTriangle className="w-3 h-3 text-[#e37400]" />
                                 <span>DNS Setup Needed &rarr;</span>
                               </button>
+                            )}
+                          </td>
+
+                          {/* Email Gateway Relay Status */}
+                          <td className="py-3 px-3.5">
+                            {tenant.smtp_host && tenant.smtp_user ? (
+                              <div className="flex flex-col">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#137333]">
+                                  <CheckCircle className="w-3 h-3 text-[#1e8e3e]" />
+                                  <span>Dedicated Relay</span>
+                                </span>
+                                <span className="text-[10px] text-[#5f6368] font-mono mt-0.5 truncate max-w-[140px]" title={`${tenant.smtp_host}:${tenant.smtp_port || 587}`}>
+                                  {tenant.smtp_host}:{tenant.smtp_port || 587}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#1a73e8]">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#1a73e8]" />
+                                  <span>Platform Shared</span>
+                                </span>
+                                <span className="text-[10px] text-[#5f6368]">Brevo High-Speed</span>
+                              </div>
                             )}
                           </td>
 
@@ -693,7 +851,16 @@ export default function SaaSAdminPortal() {
                                 <Globe className="w-3.5 h-3.5" />
                               </button>
 
-                              {/* 3. Edit Customer Details & Plan */}
+                              {/* 3. Setup Customer Email Relay / Gateway */}
+                              <button
+                                onClick={() => handleOpenGatewayModal(tenant)}
+                                title="Configure Dedicated Email Relay / SMTP Gateway for this Customer"
+                                className="p-1.5 text-[#5f6368] hover:text-[#1a73e8] hover:bg-[#e8f0fe] rounded transition-colors"
+                              >
+                                <Sliders className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* 4. Edit Customer Details & Plan */}
                               <button
                                 onClick={() => {
                                   setEditingTenant(tenant);
@@ -1223,6 +1390,453 @@ export default function SaaSAdminPortal() {
                 Save Plan
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL 4: DELIVERABILITY & DNS ARCHITECTURE GUIDE (SUPER ADMIN)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showDeliverabilityModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#202124]/50 backdrop-blur-xs">
+          <div className="bg-white w-full max-w-3xl rounded-xl border border-[#dadce0] shadow-2xl p-6 animate-fade-in text-xs max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-[#202124]">Enterprise Deliverability &amp; DNS Protocol Guide</h3>
+                  <p className="text-[11px] text-[#5f6368]">Authentication architecture to guarantee 100% Primary Inbox placement (SPF, DKIM, DMARC, IP Warming)</p>
+                </div>
+              </div>
+              <button onClick={() => setShowDeliverabilityModal(false)} className="text-[#5f6368] hover:text-[#202124] p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-2 border-b border-[#dadce0] pt-3 pb-2">
+              <button
+                onClick={() => setDeliverabilityTab("overview")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  deliverabilityTab === "overview" ? "bg-[#1a73e8] text-white" : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                Deliverability Rules
+              </button>
+              <button
+                onClick={() => setDeliverabilityTab("dns")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  deliverabilityTab === "dns" ? "bg-[#1a73e8] text-white" : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                DNS Records (SPF/DKIM/DMARC)
+              </button>
+              <button
+                onClick={() => setDeliverabilityTab("warming")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  deliverabilityTab === "warming" ? "bg-[#1a73e8] text-white" : "text-[#5f6368] hover:bg-[#f1f3f4]"
+                }`}
+              >
+                IP &amp; Domain Warming Curve
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1 text-[#3c4043] leading-relaxed">
+              {deliverabilityTab === "overview" && (
+                <div className="space-y-3">
+                  <div className="p-3.5 bg-[#e8f0fe] border border-[#d2e3fc] rounded-lg">
+                    <h4 className="font-semibold text-[#1a73e8] text-xs flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Google &amp; Yahoo 2024 Bulk Sender Compliance Standard</span>
+                    </h4>
+                    <p className="text-[11px] text-[#202124] mt-1">
+                      As an email infrastructure SaaS provider, all customer outgoing emails must comply with RFC standards to prevent spam folder relegation.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="p-3 bg-white border border-[#dadce0] rounded-lg space-y-1">
+                      <div className="font-bold text-[#202124] flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-[#1e8e3e]" />
+                        <span>1. Spam Rate &lt; 0.1%</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Keep user spam complaint rate below 0.10% (1 per 1,000 sent). Rates above 0.3% cause immediate domain throttling.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-white border border-[#dadce0] rounded-lg space-y-1">
+                      <div className="font-bold text-[#202124] flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-[#1e8e3e]" />
+                        <span>2. TLS Encryption</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        All SMTP relay connections must enforce TLS 1.2 or 1.3 encryption on ports 587 or 465.
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-white border border-[#dadce0] rounded-lg space-y-1">
+                      <div className="font-bold text-[#202124] flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 text-[#1e8e3e]" />
+                        <span>3. Forward DNS (PTR)</span>
+                      </div>
+                      <p className="text-[11px] text-[#5f6368]">
+                        Sending IP must match valid forward and reverse PTR records pointing to the relay hostname.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {deliverabilityTab === "dns" && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-[#202124]">1. SPF Record (Sender Policy Framework)</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">TXT</span>
+                    </div>
+                    <p className="text-[11px] text-[#5f6368]">Authorizes Brevo and CloudMail relays to dispatch emails from the customer domain:</p>
+                    <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
+                      <div><strong>Host:</strong> @ (or customerdomain.com)</div>
+                      <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=spf1 include:spf.brevo.com ~all</span></div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-[#202124]">2. DKIM Record (DomainKeys Identified Mail)</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">TXT / CNAME</span>
+                    </div>
+                    <p className="text-[11px] text-[#5f6368]">Cryptographic signature verified by Gmail and Outlook:</p>
+                    <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
+                      <div><strong>Host:</strong> mail._domainkey.customerdomain.com</div>
+                      <div><strong>Value:</strong> <span className="text-[#1a73e8]">k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQ...</span></div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-white border border-[#dadce0] rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-[#202124]">3. DMARC Policy</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-[#f1f3f4] text-[#202124] rounded font-semibold">TXT</span>
+                    </div>
+                    <div className="bg-[#f8f9fa] p-2.5 rounded font-mono text-[11px] space-y-1 border border-[#e8eaed]">
+                      <div><strong>Host:</strong> _dmarc.customerdomain.com</div>
+                      <div><strong>Value:</strong> <span className="text-[#1e8e3e]">v=DMARC1; p=reject; rua=mailto:dmarc-reports@customerdomain.com</span></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {deliverabilityTab === "warming" && (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-[#5f6368]">
+                    New customer domains or dedicated IPs must follow a progressive warm-up schedule to establish reputation with mailbox providers:
+                  </p>
+                  <table className="w-full text-left border-collapse border border-[#dadce0] rounded-lg overflow-hidden text-[11px]">
+                    <thead className="bg-[#f8f9fa] text-[#5f6368] font-semibold border-b border-[#dadce0]">
+                      <tr>
+                        <th className="py-2 px-3">Timeline</th>
+                        <th className="py-2 px-3">Max Emails / Day</th>
+                        <th className="py-2 px-3">Batch Pace</th>
+                        <th className="py-2 px-3">Target Inbox Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#dadce0]">
+                      <tr>
+                        <td className="py-2 px-3 font-semibold">Day 1 - 2</td>
+                        <td className="py-2 px-3 font-mono text-[#1a73e8]">50 emails</td>
+                        <td className="py-2 px-3">5 emails / min</td>
+                        <td className="py-2 px-3 text-[#1e8e3e]">Domain Handshake Initiated</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold">Day 3 - 5</td>
+                        <td className="py-2 px-3 font-mono text-[#1a73e8]">200 emails</td>
+                        <td className="py-2 px-3">15 emails / min</td>
+                        <td className="py-2 px-3 text-[#1e8e3e]">Building ESP Trust</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold">Day 6 - 9</td>
+                        <td className="py-2 px-3 font-mono text-[#1a73e8]">500 emails</td>
+                        <td className="py-2 px-3">30 emails / min</td>
+                        <td className="py-2 px-3 text-[#1e8e3e]">Standard Volume Enabled</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold">Day 10 - 14</td>
+                        <td className="py-2 px-3 font-mono text-[#1a73e8]">1,000+ emails</td>
+                        <td className="py-2 px-3">60 emails / min</td>
+                        <td className="py-2 px-3 text-[#1e8e3e]">High Reputation Primary Placement</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold">Day 15+</td>
+                        <td className="py-2 px-3 font-mono text-[#1e8e3e]">Full 2,000 - 15,000 Quota</td>
+                        <td className="py-2 px-3">Full Relay Burst</td>
+                        <td className="py-2 px-3 font-bold text-[#1e8e3e]">100% Primary Inbox Delivery</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-[#dadce0] flex justify-end">
+              <button
+                onClick={() => setShowDeliverabilityModal(false)}
+                className="px-4 py-1.5 bg-[#1a73e8] text-white rounded text-xs font-semibold hover:bg-[#1557b0] transition-colors"
+              >
+                Close Guide
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL 5: PER-CUSTOMER EMAIL GATEWAY CONFIGURATION (SUPER ADMIN)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showGatewayModal && selectedTenantGateway && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#202124]/50 backdrop-blur-xs">
+          <div className="bg-white w-full max-w-xl rounded-xl border border-[#dadce0] shadow-2xl p-6 animate-fade-in text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center">
+                  <Sliders className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-[#202124]">
+                    Customer Email Gateway Setup
+                  </h3>
+                  <p className="text-[11px] text-[#5f6368]">
+                    Configuring dedicated SMTP relay for <strong className="text-[#202124]">{selectedTenantGateway.name}</strong> ({selectedTenantGateway.id})
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowGatewayModal(false)} className="text-[#5f6368] hover:text-[#202124] p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCustomerGateway} className="mt-4 space-y-4">
+              {/* Relay Provider Selection */}
+              <div>
+                <label className="block text-xs font-semibold text-[#202124] mb-1.5">
+                  Select Relay Infrastructure
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGatewayForm((prev) => ({
+                        ...prev,
+                        host: "smtp-relay.brevo.com",
+                        port: "587",
+                        provider: "smtp",
+                      }));
+                    }}
+                    className={`p-2 rounded border text-left transition-colors ${
+                      gatewayForm.host.includes("brevo") ? "border-[#1a73e8] bg-[#e8f0fe] font-semibold text-[#1a73e8]" : "border-[#dadce0] hover:bg-[#f8f9fa]"
+                    }`}
+                  >
+                    <div className="text-xs">Brevo Relay</div>
+                    <div className="text-[10px] text-[#5f6368]">Default Multi-Tenant</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGatewayForm((prev) => ({
+                        ...prev,
+                        host: "email-smtp.us-east-1.amazonaws.com",
+                        port: "587",
+                        provider: "ses",
+                      }));
+                    }}
+                    className={`p-2 rounded border text-left transition-colors ${
+                      gatewayForm.host.includes("amazonaws") ? "border-[#1a73e8] bg-[#e8f0fe] font-semibold text-[#1a73e8]" : "border-[#dadce0] hover:bg-[#f8f9fa]"
+                    }`}
+                  >
+                    <div className="text-xs">Amazon SES</div>
+                    <div className="text-[10px] text-[#5f6368]">$0.10 / 1k emails</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGatewayForm((prev) => ({
+                        ...prev,
+                        host: "smtp.sendgrid.net",
+                        port: "587",
+                        provider: "sendgrid",
+                      }));
+                    }}
+                    className={`p-2 rounded border text-left transition-colors ${
+                      gatewayForm.host.includes("sendgrid") ? "border-[#1a73e8] bg-[#e8f0fe] font-semibold text-[#1a73e8]" : "border-[#dadce0] hover:bg-[#f8f9fa]"
+                    }`}
+                  >
+                    <div className="text-xs">SendGrid</div>
+                    <div className="text-[10px] text-[#5f6368]">Custom Enterprise</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Host and Port */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-semibold text-[#3c4043] mb-1">
+                    SMTP Host URL *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={gatewayForm.host}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, host: e.target.value })}
+                    placeholder="smtp-relay.brevo.com"
+                    className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded px-2.5 py-1.5 text-xs text-[#202124] focus:bg-white focus:outline-none focus:border-[#1a73e8]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#3c4043] mb-1">
+                    Port *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={gatewayForm.port}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, port: e.target.value })}
+                    placeholder="587"
+                    className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded px-2.5 py-1.5 text-xs text-[#202124] focus:bg-white focus:outline-none focus:border-[#1a73e8]"
+                  />
+                </div>
+              </div>
+
+              {/* Username and Password */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#3c4043] mb-1">
+                    SMTP Username / API User *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={gatewayForm.user}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, user: e.target.value })}
+                    placeholder="c03022001@smtp-brevo.com"
+                    className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded px-2.5 py-1.5 text-xs text-[#202124] focus:bg-white focus:outline-none focus:border-[#1a73e8]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#3c4043] mb-1">
+                    SMTP Secret Key / Password *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showGatewayPass ? "text" : "password"}
+                      required
+                      value={gatewayForm.pass}
+                      onChange={(e) => setGatewayForm({ ...gatewayForm, pass: e.target.value })}
+                      placeholder="SMTP Master Key"
+                      className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded pl-2.5 pr-8 py-1.5 text-xs text-[#202124] focus:bg-white focus:outline-none focus:border-[#1a73e8]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGatewayPass(!showGatewayPass)}
+                      className="absolute right-2 top-2 text-[#5f6368] hover:text-[#202124]"
+                    >
+                      {showGatewayPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sender Email & Name */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#3c4043] mb-1">
+                    Verified Sender Email *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={gatewayForm.senderEmail}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, senderEmail: e.target.value })}
+                    placeholder="invoices@acmecorp.com"
+                    className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded px-2.5 py-1.5 text-xs text-[#202124] focus:bg-white focus:outline-none focus:border-[#1a73e8]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#3c4043] mb-1">
+                    Sender Display Name
+                  </label>
+                  <input
+                    type="text"
+                    value={gatewayForm.senderName}
+                    onChange={(e) => setGatewayForm({ ...gatewayForm, senderName: e.target.value })}
+                    placeholder="Acme Billing Team"
+                    className="w-full bg-[#f8f9fa] border border-[#dadce0] rounded px-2.5 py-1.5 text-xs text-[#202124] focus:bg-white focus:outline-none focus:border-[#1a73e8]"
+                  />
+                </div>
+              </div>
+
+              {/* Live Gateway Test Feedback */}
+              {gatewayTestResult && (
+                <div
+                  className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${
+                    gatewayTestResult.success
+                      ? "bg-[#e6f4ea] text-[#137333] border-[#ceead6]"
+                      : "bg-[#fce8e6] text-[#c5221f] border-[#fad2cf]"
+                  }`}
+                >
+                  {gatewayTestResult.success ? (
+                    <CheckCircle className="w-4 h-4 shrink-0 text-[#1e8e3e] mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-[#d93025] mt-0.5" />
+                  )}
+                  <div>
+                    <div className="font-semibold">{gatewayTestResult.message}</div>
+                    {gatewayTestResult.suggestion && (
+                      <div className="text-[11px] mt-0.5 opacity-90">{gatewayTestResult.suggestion}</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between pt-3 border-t border-[#dadce0]">
+                {/* Test Gateway */}
+                <button
+                  type="button"
+                  onClick={handleTestGateway}
+                  disabled={isTestingGateway}
+                  className="px-3 py-1.5 bg-white border border-[#1a73e8] hover:bg-[#e8f0fe] text-[#1a73e8] rounded text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingGateway ? "animate-spin" : ""}`} />
+                  <span>{isTestingGateway ? "Testing Handshake..." : "⚡ Test Gateway Connection"}</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowGatewayModal(false)}
+                    className="px-3 py-1.5 border border-[#dadce0] bg-white hover:bg-[#f1f3f4] text-[#5f6368] rounded text-xs"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-4 py-1.5 bg-[#1a73e8] hover:bg-[#1557b0] text-white rounded text-xs font-semibold shadow-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <span>{isSaving ? "Saving..." : "💾 Save Gateway to Supabase"}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}

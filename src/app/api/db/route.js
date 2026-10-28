@@ -136,6 +136,13 @@ const DEFAULT_TENANTS = [
     monthly_fee: 29.00,
     billing_status: "paid",
     subscription_renews_at: "2026-11-25T08:00:00.000Z",
+    smtp_host: "smtp-relay.brevo.com",
+    smtp_port: 587,
+    smtp_user: "c03022001@smtp-brevo.com",
+    smtp_pass: "",
+    smtp_sender_email: "invoices@acmecorp.com",
+    smtp_sender_name: "Acme Billing Team",
+    gateway_provider: "smtp",
     created_at: "2026-10-01T08:00:00.000Z",
   },
   {
@@ -152,6 +159,13 @@ const DEFAULT_TENANTS = [
     monthly_fee: 29.00,
     billing_status: "paid",
     subscription_renews_at: "2026-11-16T10:30:00.000Z",
+    smtp_host: "smtp-relay.brevo.com",
+    smtp_port: 587,
+    smtp_user: "c03022001@smtp-brevo.com",
+    smtp_pass: "",
+    smtp_sender_email: "statements@globex.org",
+    smtp_sender_name: "Globex Accounts",
+    gateway_provider: "smtp",
     created_at: "2026-10-03T10:30:00.000Z",
   },
   {
@@ -168,6 +182,13 @@ const DEFAULT_TENANTS = [
     monthly_fee: 49.00,
     billing_status: "paid",
     subscription_renews_at: "2026-11-21T12:00:00.000Z",
+    smtp_host: "smtp-relay.brevo.com",
+    smtp_port: 587,
+    smtp_user: "c03022001@smtp-brevo.com",
+    smtp_pass: "",
+    smtp_sender_email: "notices@apexfinancial.com",
+    smtp_sender_name: "Apex Financial Notices",
+    gateway_provider: "smtp",
     created_at: "2026-09-15T12:00:00.000Z",
   },
   {
@@ -184,6 +205,13 @@ const DEFAULT_TENANTS = [
     monthly_fee: 19.00,
     billing_status: "paid",
     subscription_renews_at: "2026-11-09T14:15:00.000Z",
+    smtp_host: "smtp-relay.brevo.com",
+    smtp_port: 587,
+    smtp_user: "c03022001@smtp-brevo.com",
+    smtp_pass: "",
+    smtp_sender_email: "reports@sterlinghealth.io",
+    smtp_sender_name: "Sterling Patient Reports",
+    gateway_provider: "smtp",
     created_at: "2026-10-10T14:15:00.000Z",
   },
   {
@@ -200,6 +228,13 @@ const DEFAULT_TENANTS = [
     monthly_fee: 29.00,
     billing_status: "paid",
     subscription_renews_at: "2026-11-26T09:00:00.000Z",
+    smtp_host: "smtp-relay.brevo.com",
+    smtp_port: 587,
+    smtp_user: "c03022001@smtp-brevo.com",
+    smtp_pass: "",
+    smtp_sender_email: "orders@nexusretail.com",
+    smtp_sender_name: "Nexus Dispatch",
+    gateway_provider: "smtp",
     created_at: "2026-10-20T09:00:00.000Z",
   },
   {
@@ -216,6 +251,13 @@ const DEFAULT_TENANTS = [
     monthly_fee: 29.00,
     billing_status: "paid",
     subscription_renews_at: "2026-11-19T11:00:00.000Z",
+    smtp_host: "smtp-relay.brevo.com",
+    smtp_port: 587,
+    smtp_user: "c03022001@smtp-brevo.com",
+    smtp_pass: "",
+    smtp_sender_email: "rent@vanguardprop.com",
+    smtp_sender_name: "Vanguard Statements",
+    gateway_provider: "smtp",
     created_at: "2026-10-22T11:00:00.000Z",
   },
 ];
@@ -297,6 +339,13 @@ CREATE TABLE IF NOT EXISTS tenants (
   monthly_fee NUMERIC DEFAULT 29.00,
   billing_status TEXT DEFAULT 'paid',
   subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
+  smtp_host TEXT,
+  smtp_port INTEGER DEFAULT 587,
+  smtp_user TEXT,
+  smtp_pass TEXT,
+  smtp_sender_email TEXT,
+  smtp_sender_name TEXT,
+  gateway_provider TEXT DEFAULT 'smtp',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -332,6 +381,13 @@ ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC DEFAULT 29.00;
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_status TEXT DEFAULT 'paid';
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days');
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_host TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_user TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_pass TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_sender_email TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_sender_name TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS gateway_provider TEXT DEFAULT 'smtp';
 `;
 
 const SEED_DATA_SQL = `
@@ -388,14 +444,14 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Initial Corporate Tenants
-INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, subscription_renews_at)
+INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, subscription_renews_at, smtp_host, smtp_port, smtp_user, smtp_sender_email, smtp_sender_name, gateway_provider)
 VALUES
-  ('tenant_acme', 'Acme Global Manufacturing', 'admin@acmecorp.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'plan_standard', 2000, 1420, true, 'active', 29.00, 'paid', NOW() + INTERVAL '28 days'),
-  ('tenant_globex', 'Globex Logistics International', 'dispatch@globex.org', 'statements@globex.org', 'Globex Accounts', 'plan_standard', 2000, 1850, true, 'active', 29.00, 'paid', NOW() + INTERVAL '19 days'),
-  ('tenant_apex', 'Apex Financial Partners', 'billing@apexfinancial.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'plan_enterprise', 5000, 3120, true, 'active', 49.00, 'paid', NOW() + INTERVAL '24 days'),
-  ('tenant_sterling', 'Sterling Healthcare Systems', 'it@sterlinghealth.io', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'plan_starter', 2000, 890, true, 'active', 19.00, 'paid', NOW() + INTERVAL '12 days'),
-  ('tenant_nexus', 'Nexus Direct Retail Network', 'ops@nexusretail.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'plan_standard', 2000, 1200, false, 'pending_dns', 29.00, 'paid', NOW() + INTERVAL '29 days'),
-  ('tenant_vanguard', 'Vanguard Property Holdings', 'leases@vanguardprop.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'plan_standard', 2000, 1640, true, 'active', 29.00, 'paid', NOW() + INTERVAL '22 days')
+  ('tenant_acme', 'Acme Global Manufacturing', 'admin@acmecorp.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'plan_standard', 2000, 1420, true, 'active', 29.00, 'paid', NOW() + INTERVAL '28 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'smtp'),
+  ('tenant_globex', 'Globex Logistics International', 'dispatch@globex.org', 'statements@globex.org', 'Globex Accounts', 'plan_standard', 2000, 1850, true, 'active', 29.00, 'paid', NOW() + INTERVAL '19 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'statements@globex.org', 'Globex Accounts', 'smtp'),
+  ('tenant_apex', 'Apex Financial Partners', 'billing@apexfinancial.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'plan_enterprise', 5000, 3120, true, 'active', 49.00, 'paid', NOW() + INTERVAL '24 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'smtp'),
+  ('tenant_sterling', 'Sterling Healthcare Systems', 'it@sterlinghealth.io', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'plan_starter', 2000, 890, true, 'active', 19.00, 'paid', NOW() + INTERVAL '12 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'smtp'),
+  ('tenant_nexus', 'Nexus Direct Retail Network', 'ops@nexusretail.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'plan_standard', 2000, 1200, false, 'pending_dns', 29.00, 'paid', NOW() + INTERVAL '29 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'smtp'),
+  ('tenant_vanguard', 'Vanguard Property Holdings', 'leases@vanguardprop.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'plan_standard', 2000, 1640, true, 'active', 29.00, 'paid', NOW() + INTERVAL '22 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'smtp')
 ON CONFLICT (id) DO NOTHING;
 `;
 
@@ -795,14 +851,26 @@ export async function POST(req) {
       const monthlyFee = parseFloat(tenant.monthly_fee || 29.00);
       const billingStatus = tenant.billing_status || "paid";
       const subscriptionRenewsAt = tenant.subscription_renews_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const smtpHost = (tenant.smtp_host || "").trim();
+      const smtpPort = parseInt(tenant.smtp_port || 587, 10);
+      const smtpUser = (tenant.smtp_user || "").trim();
+      const smtpPass = (tenant.smtp_pass || "").trim();
+      const smtpSenderEmail = (tenant.smtp_sender_email || senderEmail || "").trim();
+      const smtpSenderName = (tenant.smtp_sender_name || senderName || "").trim();
+      const gatewayProvider = tenant.gateway_provider || "smtp";
 
       if (pool) {
         const client = await pool.connect();
         try {
           await client.query(FULL_SCHEMA_SQL);
           await client.query(
-            `INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, subscription_renews_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+            `INSERT INTO tenants (
+              id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota,
+              domain_verified, status, monthly_fee, billing_status, subscription_renews_at,
+              smtp_host, smtp_port, smtp_user, smtp_pass, smtp_sender_email, smtp_sender_name, gateway_provider,
+              updated_at
+            )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
              ON CONFLICT (id) DO UPDATE SET
                name = EXCLUDED.name,
                contact_email = EXCLUDED.contact_email,
@@ -816,9 +884,39 @@ export async function POST(req) {
                monthly_fee = EXCLUDED.monthly_fee,
                billing_status = EXCLUDED.billing_status,
                subscription_renews_at = EXCLUDED.subscription_renews_at,
+               smtp_host = EXCLUDED.smtp_host,
+               smtp_port = EXCLUDED.smtp_port,
+               smtp_user = EXCLUDED.smtp_user,
+               smtp_pass = EXCLUDED.smtp_pass,
+               smtp_sender_email = EXCLUDED.smtp_sender_email,
+               smtp_sender_name = EXCLUDED.smtp_sender_name,
+               gateway_provider = EXCLUDED.gateway_provider,
                updated_at = NOW();`,
-            [id, name, contactEmail, senderEmail, senderName, planId, monthlyQuota, usedQuota, domainVerified, status, monthlyFee, billingStatus, subscriptionRenewsAt]
+            [
+              id, name, contactEmail, senderEmail, senderName, planId, monthlyQuota, usedQuota,
+              domainVerified, status, monthlyFee, billingStatus, subscriptionRenewsAt,
+              smtpHost, smtpPort, smtpUser, smtpPass, smtpSenderEmail, smtpSenderName, gatewayProvider
+            ]
           );
+
+          // If custom SMTP credentials provided, store in smtp_configurations table as well
+          if (smtpHost && smtpUser) {
+            await client.query(
+              `INSERT INTO smtp_configurations (id, tenant_id, host, port, username, password, sender_email, sender_name, is_active, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW())
+               ON CONFLICT (id) DO UPDATE SET
+                 tenant_id = EXCLUDED.tenant_id,
+                 host = EXCLUDED.host,
+                 port = EXCLUDED.port,
+                 username = EXCLUDED.username,
+                 password = EXCLUDED.password,
+                 sender_email = EXCLUDED.sender_email,
+                 sender_name = EXCLUDED.sender_name,
+                 is_active = true,
+                 updated_at = NOW();`,
+              [`smtp_${id}`, id, smtpHost, smtpPort, smtpUser, smtpPass, smtpSenderEmail, smtpSenderName]
+            ).catch((e) => console.warn("SMTP config sync notice:", e.message));
+          }
 
           // Auto-provision Company User account for instant client login
           await client.query(
@@ -832,8 +930,13 @@ export async function POST(req) {
 
           return NextResponse.json({
             success: true,
-            tenant: { id, name, contact_email: contactEmail, sender_email: senderEmail, plan_id: planId, monthly_quota: monthlyQuota, used_quota: usedQuota, subscription_renews_at: subscriptionRenewsAt },
-            message: `Customer '${name}' successfully onboarded to Supabase with company credentials!`,
+            tenant: {
+              id, name, contact_email: contactEmail, sender_email: senderEmail, plan_id: planId,
+              monthly_quota: monthlyQuota, used_quota: usedQuota, subscription_renews_at: subscriptionRenewsAt,
+              smtp_host: smtpHost, smtp_port: smtpPort, smtp_user: smtpUser, smtp_sender_email: smtpSenderEmail,
+              smtp_sender_name: smtpSenderName, gateway_provider: gatewayProvider
+            },
+            message: `Customer '${name}' successfully onboarded to Supabase with company credentials and gateway configuration!`,
           });
         } finally {
           client.release();
@@ -857,6 +960,13 @@ export async function POST(req) {
         monthly_fee: monthlyFee,
         billing_status: billingStatus,
         subscription_renews_at: subscriptionRenewsAt,
+        smtp_host: smtpHost,
+        smtp_port: smtpPort,
+        smtp_user: smtpUser,
+        smtp_pass: smtpPass,
+        smtp_sender_email: smtpSenderEmail,
+        smtp_sender_name: smtpSenderName,
+        gateway_provider: gatewayProvider,
         created_at: new Date().toISOString()
       };
       if (existingIdx >= 0) {
@@ -869,7 +979,7 @@ export async function POST(req) {
       return NextResponse.json({
         success: true,
         tenant: newTenant,
-        message: `Customer '${name}' saved to Demo Storage.`,
+        message: `Customer '${name}' saved with gateway configuration.`,
       });
     }
 
