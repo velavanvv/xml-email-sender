@@ -13,6 +13,7 @@ const MOCK_STORAGE_FILE = path.join("/tmp", "xml_dispatch_cloud_db.json");
 const DEFAULT_CLOUD_RECORDS = [
   {
     id: "rec_cloud_demo_1",
+    tenant_id: "tenant_acme",
     recipient_email: "alex.turner@example.com",
     subject: "Monthly Statement - October 2026",
     message: "Hi Alex, please find your monthly summary statement attached. Contact our accounts team if you have any questions.",
@@ -26,6 +27,7 @@ const DEFAULT_CLOUD_RECORDS = [
   },
   {
     id: "rec_cloud_demo_2",
+    tenant_id: "tenant_globex",
     recipient_email: "sarah.jenkins@acmecorp.io",
     subject: "Contract Agreement & Verification",
     message: "Dear Sarah, attached is the revised NDA and enterprise service contract for your review and execution.",
@@ -70,11 +72,154 @@ const DEFAULT_USER = {
   role: "administrator",
 };
 
-// Full DDL schema for all 4 distinct Supabase tables
+// Default Subscription Plans
+const DEFAULT_PLANS = [
+  {
+    id: "plan_starter",
+    name: "Starter Tier",
+    price_monthly: 19.00,
+    email_limit: 2000,
+    features: [
+      "2,000 Verified Emails / Mo",
+      "1 Custom Verified Domain",
+      "XML & CSV Ingestion",
+      "Standard Relay Queue",
+      "Standard Email Support",
+    ],
+    is_active: true,
+  },
+  {
+    id: "plan_standard",
+    name: "Standard Business",
+    price_monthly: 29.00,
+    email_limit: 5000,
+    features: [
+      "5,000 Verified Emails / Mo",
+      "3 Custom Verified Domains",
+      "Unified & Individual Templates",
+      "Automated PDF Attachments",
+      "Priority Relay Queue",
+      "Delivery & Bounce Logs",
+    ],
+    is_active: true,
+  },
+  {
+    id: "plan_enterprise",
+    name: "Enterprise Tier",
+    price_monthly: 49.00,
+    email_limit: 15000,
+    features: [
+      "15,000 Verified Emails / Mo",
+      "Unlimited Verified Domains",
+      "Dedicated High-Speed Relay",
+      "Custom DKIM & SPF Alignment",
+      "99.9% Uptime Deliverability SLA",
+      "Dedicated Account Manager",
+    ],
+    is_active: true,
+  },
+];
+
+// Default Corporate Tenants (Simulating 20+ Client Management)
+const DEFAULT_TENANTS = [
+  {
+    id: "tenant_acme",
+    name: "Acme Global Manufacturing",
+    contact_email: "admin@acmecorp.com",
+    sender_email: "invoices@acmecorp.com",
+    sender_name: "Acme Billing Team",
+    plan_id: "plan_standard",
+    monthly_quota: 2000,
+    used_quota: 1420,
+    domain_verified: true,
+    status: "active",
+    monthly_fee: 29.00,
+    billing_status: "paid",
+    created_at: "2026-10-01T08:00:00.000Z",
+  },
+  {
+    id: "tenant_globex",
+    name: "Globex Logistics International",
+    contact_email: "dispatch@globex.org",
+    sender_email: "statements@globex.org",
+    sender_name: "Globex Accounts",
+    plan_id: "plan_standard",
+    monthly_quota: 2000,
+    used_quota: 1850,
+    domain_verified: true,
+    status: "active",
+    monthly_fee: 29.00,
+    billing_status: "paid",
+    created_at: "2026-10-03T10:30:00.000Z",
+  },
+  {
+    id: "tenant_apex",
+    name: "Apex Financial Partners",
+    contact_email: "billing@apexfinancial.com",
+    sender_email: "notices@apexfinancial.com",
+    sender_name: "Apex Financial Notices",
+    plan_id: "plan_enterprise",
+    monthly_quota: 5000,
+    used_quota: 3120,
+    domain_verified: true,
+    status: "active",
+    monthly_fee: 49.00,
+    billing_status: "paid",
+    created_at: "2026-09-15T12:00:00.000Z",
+  },
+  {
+    id: "tenant_sterling",
+    name: "Sterling Healthcare Systems",
+    contact_email: "it@sterlinghealth.io",
+    sender_email: "reports@sterlinghealth.io",
+    sender_name: "Sterling Patient Reports",
+    plan_id: "plan_starter",
+    monthly_quota: 2000,
+    used_quota: 890,
+    domain_verified: true,
+    status: "active",
+    monthly_fee: 19.00,
+    billing_status: "paid",
+    created_at: "2026-10-10T14:15:00.000Z",
+  },
+  {
+    id: "tenant_nexus",
+    name: "Nexus Direct Retail Network",
+    contact_email: "ops@nexusretail.com",
+    sender_email: "orders@nexusretail.com",
+    sender_name: "Nexus Dispatch",
+    plan_id: "plan_standard",
+    monthly_quota: 2000,
+    used_quota: 1200,
+    domain_verified: false,
+    status: "pending_dns",
+    monthly_fee: 29.00,
+    billing_status: "paid",
+    created_at: "2026-10-20T09:00:00.000Z",
+  },
+  {
+    id: "tenant_vanguard",
+    name: "Vanguard Property Holdings",
+    contact_email: "leases@vanguardprop.com",
+    sender_email: "rent@vanguardprop.com",
+    sender_name: "Vanguard Statements",
+    plan_id: "plan_standard",
+    monthly_quota: 2000,
+    used_quota: 1640,
+    domain_verified: true,
+    status: "active",
+    monthly_fee: 29.00,
+    billing_status: "paid",
+    created_at: "2026-10-22T11:00:00.000Z",
+  },
+];
+
+// Full DDL schema for Multi-Tenant Supabase tables
 export const FULL_SCHEMA_SQL = `
 -- 1. Table: email_records
 CREATE TABLE IF NOT EXISTS email_records (
   id TEXT PRIMARY KEY,
+  tenant_id TEXT DEFAULT 'default',
   recipient_email TEXT NOT NULL,
   subject TEXT,
   message TEXT,
@@ -93,6 +238,7 @@ CREATE TABLE IF NOT EXISTS email_records (
 -- 2. Table: smtp_configurations
 CREATE TABLE IF NOT EXISTS smtp_configurations (
   id TEXT PRIMARY KEY DEFAULT 'default',
+  tenant_id TEXT DEFAULT 'default',
   host TEXT NOT NULL,
   port INTEGER DEFAULT 587,
   username TEXT NOT NULL,
@@ -106,6 +252,7 @@ CREATE TABLE IF NOT EXISTS smtp_configurations (
 -- 3. Table: email_configurations
 CREATE TABLE IF NOT EXISTS email_configurations (
   id TEXT PRIMARY KEY DEFAULT 'default',
+  tenant_id TEXT DEFAULT 'default',
   active_provider TEXT DEFAULT 'smtp',
   resend_api_key TEXT,
   resend_from_email TEXT,
@@ -121,11 +268,41 @@ CREATE TABLE IF NOT EXISTS email_configurations (
 -- 4. Table: users
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
+  tenant_id TEXT DEFAULT 'default',
   email TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
   role TEXT DEFAULT 'operator',
   last_login_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Table: tenants (Commercial Customers)
+CREATE TABLE IF NOT EXISTS tenants (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  contact_email TEXT NOT NULL,
+  sender_email TEXT NOT NULL,
+  sender_name TEXT DEFAULT 'Accounts Dept',
+  plan_id TEXT DEFAULT 'plan_standard',
+  monthly_quota INTEGER DEFAULT 2000,
+  used_quota INTEGER DEFAULT 0,
+  domain_verified BOOLEAN DEFAULT true,
+  status TEXT DEFAULT 'active',
+  monthly_fee NUMERIC DEFAULT 29.00,
+  billing_status TEXT DEFAULT 'paid',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Table: plans (SaaS Subscription Monetization)
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  price_monthly NUMERIC NOT NULL,
+  email_limit INTEGER NOT NULL,
+  features JSONB DEFAULT '[]'::jsonb,
+  is_active BOOLEAN DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 `;
 
@@ -172,13 +349,31 @@ VALUES (
   NOW()
 )
 ON CONFLICT (id) DO NOTHING;
+
+-- Seed Plans
+INSERT INTO plans (id, name, price_monthly, email_limit, features)
+VALUES 
+  ('plan_starter', 'Starter Tier', 19.00, 2000, '["2,000 Verified Emails / Mo", "1 Custom Verified Domain", "XML & CSV Ingestion", "Standard Relay Access"]'::jsonb),
+  ('plan_standard', 'Standard Business', 29.00, 5000, '["5,000 Verified Emails / Mo", "3 Custom Verified Domains", "Automated PDF Attachments", "Priority Queue", "Detailed Delivery Logs"]'::jsonb),
+  ('plan_enterprise', 'Enterprise Tier', 49.00, 15000, '["15,000 Verified Emails / Mo", "Unlimited Verified Domains", "Dedicated High-Speed Relay", "Custom DKIM & SPF Alignment", "24/7 SLA Support"]'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed Initial Corporate Tenants
+INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status)
+VALUES
+  ('tenant_acme', 'Acme Global Manufacturing', 'admin@acmecorp.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'plan_standard', 2000, 1420, true, 'active', 29.00, 'paid'),
+  ('tenant_globex', 'Globex Logistics International', 'dispatch@globex.org', 'statements@globex.org', 'Globex Accounts', 'plan_standard', 2000, 1850, true, 'active', 29.00, 'paid'),
+  ('tenant_apex', 'Apex Financial Partners', 'billing@apexfinancial.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'plan_enterprise', 5000, 3120, true, 'active', 49.00, 'paid'),
+  ('tenant_sterling', 'Sterling Healthcare Systems', 'it@sterlinghealth.io', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'plan_starter', 2000, 890, true, 'active', 19.00, 'paid'),
+  ('tenant_nexus', 'Nexus Direct Retail Network', 'ops@nexusretail.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'plan_standard', 2000, 1200, false, 'pending_dns', 29.00, 'paid'),
+  ('tenant_vanguard', 'Vanguard Property Holdings', 'leases@vanguardprop.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'plan_standard', 2000, 1640, true, 'active', 29.00, 'paid')
+ON CONFLICT (id) DO NOTHING;
 `;
 
 function getPool(customConnStr = "") {
   const conn = (customConnStr || process.env.DATABASE_URL || "").trim();
   if (!conn) return null;
 
-  // Direct Supabase host check: db.[ref].supabase.co is IPv6-only and cannot be reached from Vercel
   if (conn.includes("db.") && conn.includes(".supabase.co")) {
     const error = new Error("Direct Supabase host 'db.[ref].supabase.co' is IPv6-only and cannot be reached from Vercel serverless. Please switch to the Supabase Connection Pooler URI (aws-0-[region].pooler.supabase.com:6543 or 5432) in Supabase Project Settings -> Database.");
     error.code = "SUPABASE_IPV6_DIRECT_NOT_SUPPORTED";
@@ -214,6 +409,8 @@ function readStorage() {
     smtpConfig: DEFAULT_SMTP_CONFIG,
     emailConfig: DEFAULT_EMAIL_CONFIG,
     users: [DEFAULT_USER],
+    tenants: DEFAULT_TENANTS,
+    plans: DEFAULT_PLANS,
   };
 }
 
@@ -237,7 +434,7 @@ function getSupabaseSuggestion(err, connStr = "") {
   return "If using Supabase, ensure your connection string includes '?sslmode=require' and password is correct.";
 }
 
-// GET: Fetch all tables or initialize tables in Supabase Postgres
+// GET: Fetch all tables, admin metrics, or initialize schema in Supabase Postgres
 export async function GET(req) {
   let pool = null;
   let connStr = "";
@@ -245,13 +442,14 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action");
+    const tenantId = searchParams.get("tenantId") || "";
     const headerConn = req.headers.get("x-database-url") || "";
     const queryConn = searchParams.get("connectionString") || "";
     connStr = (queryConn || headerConn).trim();
 
     pool = getPool(connStr);
 
-    // Initialize all 4 tables in Supabase
+    // 1. Initialize All Multi-Tenant Tables in Supabase
     if (action === "test" || action === "init_table" || action === "init_all_tables") {
       if (pool) {
         const client = await pool.connect();
@@ -259,11 +457,12 @@ export async function GET(req) {
           await client.query(FULL_SCHEMA_SQL);
           await client.query(SEED_DATA_SQL);
 
-          // Get counts of each table
           const recordsCount = await client.query("SELECT COUNT(*) FROM email_records;");
           const smtpCount = await client.query("SELECT COUNT(*) FROM smtp_configurations;");
           const emailConfigCount = await client.query("SELECT COUNT(*) FROM email_configurations;");
           const usersCount = await client.query("SELECT COUNT(*) FROM users;");
+          const tenantsCount = await client.query("SELECT COUNT(*) FROM tenants;");
+          const plansCount = await client.query("SELECT COUNT(*) FROM plans;");
 
           return NextResponse.json({
             success: true,
@@ -274,8 +473,10 @@ export async function GET(req) {
               smtp_configurations: parseInt(smtpCount.rows[0]?.count || 0, 10),
               email_configurations: parseInt(emailConfigCount.rows[0]?.count || 0, 10),
               users: parseInt(usersCount.rows[0]?.count || 0, 10),
+              tenants: parseInt(tenantsCount.rows[0]?.count || 0, 10),
+              plans: parseInt(plansCount.rows[0]?.count || 0, 10),
             },
-            message: `✅ All 4 Supabase tables initialized! (email_records, smtp_configurations, email_configurations, users)`,
+            message: `✅ All 6 Multi-Tenant Supabase tables verified & initialized!`,
             host: "Supabase / PostgreSQL Cloud Database",
           });
         } finally {
@@ -286,20 +487,107 @@ export async function GET(req) {
       return NextResponse.json({
         success: true,
         status: "connected",
-        message: "Free Mock Storage connected and active.",
-        tables: { email_records: 2, smtp_configurations: 1, email_configurations: 1, users: 1 },
+        message: "Free Storage connected and active.",
+        tables: { email_records: 2, smtp_configurations: 1, email_configurations: 1, users: 1, tenants: 6, plans: 3 },
         host: "Cloud Hosted Demo Store (Free)",
       });
     }
 
-    // Load everything from Supabase (or fallback storage)
+    // 2. Admin Load All (Tenants, Plans, Metrics & Revenue Analytics)
+    if (action === "admin_load_all") {
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query(FULL_SCHEMA_SQL);
+
+          const tenantsRes = await client.query("SELECT * FROM tenants ORDER BY created_at DESC;");
+          const plansRes = await client.query("SELECT * FROM plans ORDER BY price_monthly ASC;");
+          const dispatchesRes = await client.query("SELECT COUNT(*) FROM email_records;");
+
+          const tenants = tenantsRes.rows;
+          const plans = plansRes.rows;
+          const totalDispatches = parseInt(dispatchesRes.rows[0]?.count || 0, 10);
+
+          // Calculate Financial Metrics
+          const mrr = tenants.reduce((acc, t) => acc + (parseFloat(t.monthly_fee) || 0), 0);
+          const arr = mrr * 12;
+          const activeTenants = tenants.filter((t) => t.status === "active").length;
+          const aggregateQuotaUsed = tenants.reduce((acc, t) => acc + (parseInt(t.used_quota, 10) || 0), 0);
+          const aggregateTotalQuota = tenants.reduce((acc, t) => acc + (parseInt(t.monthly_quota, 10) || 0), 0);
+          const estInfrastructureCost = 49.00; // $20 Vercel + $25 Supabase + $4 SES
+          const netProfit = Math.max(0, mrr - estInfrastructureCost);
+          const profitMargin = mrr > 0 ? ((netProfit / mrr) * 100).toFixed(1) : "0";
+
+          return NextResponse.json({
+            success: true,
+            tenants,
+            plans,
+            metrics: {
+              mrr,
+              arr,
+              activeTenants,
+              totalClients: tenants.length,
+              aggregateQuotaUsed,
+              aggregateTotalQuota,
+              totalDispatches,
+              estInfrastructureCost,
+              netProfit,
+              profitMargin,
+            },
+            host: "Supabase / PostgreSQL Cloud Database",
+          });
+        } finally {
+          client.release();
+        }
+      }
+
+      const storage = readStorage();
+      const tenants = storage.tenants || DEFAULT_TENANTS;
+      const plans = storage.plans || DEFAULT_PLANS;
+      const mrr = tenants.reduce((acc, t) => acc + (parseFloat(t.monthly_fee) || 0), 0);
+      const arr = mrr * 12;
+      const activeTenants = tenants.filter((t) => t.status === "active").length;
+      const aggregateQuotaUsed = tenants.reduce((acc, t) => acc + (parseInt(t.used_quota, 10) || 0), 0);
+      const aggregateTotalQuota = tenants.reduce((acc, t) => acc + (parseInt(t.monthly_quota, 10) || 0), 0);
+      const estInfrastructureCost = 49.00;
+      const netProfit = Math.max(0, mrr - estInfrastructureCost);
+      const profitMargin = mrr > 0 ? ((netProfit / mrr) * 100).toFixed(1) : "0";
+
+      return NextResponse.json({
+        success: true,
+        tenants,
+        plans,
+        metrics: {
+          mrr,
+          arr,
+          activeTenants,
+          totalClients: tenants.length,
+          aggregateQuotaUsed,
+          aggregateTotalQuota,
+          totalDispatches: storage.records?.length || 0,
+          estInfrastructureCost,
+          netProfit,
+          profitMargin,
+        },
+        host: "Cloud Hosted Demo Store (Free)",
+      });
+    }
+
+    // 3. Regular Load All (for dispatch console)
     if (pool) {
       const client = await pool.connect();
       try {
         await client.query(FULL_SCHEMA_SQL);
 
-        // 1. Fetch records
-        const recResult = await client.query("SELECT * FROM email_records ORDER BY created_at DESC;");
+        // Filter by tenant if provided
+        let querySql = "SELECT * FROM email_records ORDER BY created_at DESC;";
+        let params = [];
+        if (tenantId && tenantId !== "all") {
+          querySql = "SELECT * FROM email_records WHERE tenant_id = $1 OR tenant_id = 'default' ORDER BY created_at DESC;";
+          params = [tenantId];
+        }
+
+        const recResult = await client.query(querySql, params);
         const records = recResult.rows.map((row) => ({
           ...row,
           created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
@@ -307,7 +595,6 @@ export async function GET(req) {
           extra_fields: typeof row.extra_fields === "string" ? JSON.parse(row.extra_fields) : (row.extra_fields || {}),
         }));
 
-        // 2. Fetch active SMTP config
         const smtpResult = await client.query("SELECT * FROM smtp_configurations WHERE is_active = true ORDER BY updated_at DESC LIMIT 1;");
         const smtpRow = smtpResult.rows[0] || null;
         const smtpConfig = smtpRow ? {
@@ -319,7 +606,6 @@ export async function GET(req) {
           senderName: smtpRow.sender_name || "CloudMail Team",
         } : null;
 
-        // 3. Fetch Email gateway & template config
         const emailCfgResult = await client.query("SELECT * FROM email_configurations ORDER BY updated_at DESC LIMIT 1;");
         const emailCfgRow = emailCfgResult.rows[0] || null;
         const emailConfig = emailCfgRow ? {
@@ -334,9 +620,11 @@ export async function GET(req) {
           commonBodyTemplate: emailCfgRow.common_body_template || "",
         } : null;
 
-        // 4. Fetch Users (safe fields)
         const userResult = await client.query("SELECT id, email, role, last_login_at, created_at FROM users ORDER BY created_at ASC;");
         const users = userResult.rows;
+
+        const tenantsResult = await client.query("SELECT id, name, sender_email, plan_id, monthly_quota, used_quota, status FROM tenants ORDER BY name ASC;");
+        const tenants = tenantsResult.rows;
 
         return NextResponse.json({
           success: true,
@@ -345,6 +633,7 @@ export async function GET(req) {
           smtpConfig,
           emailConfig,
           users,
+          tenants,
           host: "Supabase / PostgreSQL Cloud Database",
           timestamp: new Date().toISOString(),
         });
@@ -368,6 +657,7 @@ export async function GET(req) {
       } : null,
       emailConfig: storage.emailConfig,
       users: storage.users || [],
+      tenants: storage.tenants || DEFAULT_TENANTS,
       host: "Cloud Hosted Demo Store (Free)",
       timestamp: new Date().toISOString(),
     });
@@ -384,7 +674,7 @@ export async function GET(req) {
   }
 }
 
-// POST: Save records, save SMTP config, save email config, or authenticate against Supabase
+// POST: Save records, save SMTP config, manage tenants & plans, or authenticate against Supabase
 export async function POST(req) {
   let pool = null;
   let connStr = "";
@@ -398,6 +688,9 @@ export async function POST(req) {
       smtpConfig = null,
       emailConfig = null,
       authCredentials = null,
+      tenant = null,
+      tenantId = null,
+      plan = null,
     } = body;
 
     const headerConn = req.headers.get("x-database-url") || "";
@@ -426,6 +719,8 @@ export async function POST(req) {
         const smtpCount = await client.query("SELECT COUNT(*) FROM smtp_configurations;");
         const emailConfigCount = await client.query("SELECT COUNT(*) FROM email_configurations;");
         const usersCount = await client.query("SELECT COUNT(*) FROM users;");
+        const tenantsCount = await client.query("SELECT COUNT(*) FROM tenants;");
+        const plansCount = await client.query("SELECT COUNT(*) FROM plans;");
 
         return NextResponse.json({
           success: true,
@@ -436,8 +731,10 @@ export async function POST(req) {
             smtp_configurations: parseInt(smtpCount.rows[0]?.count || 0, 10),
             email_configurations: parseInt(emailConfigCount.rows[0]?.count || 0, 10),
             users: parseInt(usersCount.rows[0]?.count || 0, 10),
+            tenants: parseInt(tenantsCount.rows[0]?.count || 0, 10),
+            plans: parseInt(plansCount.rows[0]?.count || 0, 10),
           },
-          message: `✅ All 4 Supabase tables initialized! (email_records, smtp_configurations, email_configurations, users)`,
+          message: `✅ All 6 Multi-Tenant Supabase tables verified & initialized!`,
           host: "Supabase / PostgreSQL Cloud Database",
         });
       } finally {
@@ -445,7 +742,129 @@ export async function POST(req) {
       }
     }
 
-    // 2. ACTION: Save / Update SMTP Configuration in Supabase
+    // 2. ACTION: Create or Update Tenant / Customer
+    if (action === "create_tenant" && tenant) {
+      const id = tenant.id || `tenant_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const name = (tenant.name || "Commercial Client").trim();
+      const contactEmail = (tenant.contact_email || "").trim();
+      const senderEmail = (tenant.sender_email || "").trim();
+      const senderName = (tenant.sender_name || "Accounts Dept").trim();
+      const planId = tenant.plan_id || "plan_standard";
+      const monthlyQuota = parseInt(tenant.monthly_quota || 2000, 10);
+      const usedQuota = parseInt(tenant.used_quota || 0, 10);
+      const domainVerified = tenant.domain_verified !== undefined ? Boolean(tenant.domain_verified) : true;
+      const status = tenant.status || "active";
+      const monthlyFee = parseFloat(tenant.monthly_fee || 29.00);
+      const billingStatus = tenant.billing_status || "paid";
+
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query(FULL_SCHEMA_SQL);
+          await client.query(
+            `INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               name = EXCLUDED.name,
+               contact_email = EXCLUDED.contact_email,
+               sender_email = EXCLUDED.sender_email,
+               sender_name = EXCLUDED.sender_name,
+               plan_id = EXCLUDED.plan_id,
+               monthly_quota = EXCLUDED.monthly_quota,
+               used_quota = EXCLUDED.used_quota,
+               domain_verified = EXCLUDED.domain_verified,
+               status = EXCLUDED.status,
+               monthly_fee = EXCLUDED.monthly_fee,
+               billing_status = EXCLUDED.billing_status,
+               updated_at = NOW();`,
+            [id, name, contactEmail, senderEmail, senderName, planId, monthlyQuota, usedQuota, domainVerified, status, monthlyFee, billingStatus]
+          );
+
+          return NextResponse.json({
+            success: true,
+            tenant: { id, name, contact_email: contactEmail, sender_email: senderEmail, plan_id: planId, monthly_quota: monthlyQuota, used_quota: usedQuota },
+            message: `Customer '${name}' successfully saved to Supabase 'tenants' table.`,
+          });
+        } finally {
+          client.release();
+        }
+      }
+
+      const storage = readStorage();
+      const tenants = storage.tenants || DEFAULT_TENANTS;
+      const existingIdx = tenants.findIndex((t) => t.id === id);
+      const newTenant = { id, name, contact_email: contactEmail, sender_email: senderEmail, sender_name: senderName, plan_id: planId, monthly_quota: monthlyQuota, used_quota: usedQuota, domain_verified: domainVerified, status, monthly_fee: monthlyFee, billing_status: billingStatus, created_at: new Date().toISOString() };
+      if (existingIdx >= 0) {
+        tenants[existingIdx] = newTenant;
+      } else {
+        tenants.unshift(newTenant);
+      }
+      writeStorage({ tenants });
+
+      return NextResponse.json({
+        success: true,
+        tenant: newTenant,
+        message: `Customer '${name}' saved to Demo Storage.`,
+      });
+    }
+
+    // 3. ACTION: Delete Tenant / Customer
+    if (action === "delete_tenant" && tenantId) {
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query("DELETE FROM tenants WHERE id = $1;", [tenantId]);
+          return NextResponse.json({ success: true, message: "Customer removed successfully." });
+        } finally {
+          client.release();
+        }
+      }
+
+      const storage = readStorage();
+      const tenants = (storage.tenants || DEFAULT_TENANTS).filter((t) => t.id !== tenantId);
+      writeStorage({ tenants });
+      return NextResponse.json({ success: true, message: "Customer removed from storage." });
+    }
+
+    // 4. ACTION: Update Subscription Plan
+    if (action === "update_plan" && plan) {
+      const planId = plan.id;
+      const name = (plan.name || "Plan").trim();
+      const priceMonthly = parseFloat(plan.price_monthly || 29.00);
+      const emailLimit = parseInt(plan.email_limit || 2000, 10);
+      const features = Array.isArray(plan.features) ? plan.features : [];
+
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query(
+            `INSERT INTO plans (id, name, price_monthly, email_limit, features, is_active, updated_at)
+             VALUES ($1, $2, $3, $4, $5, true, NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               name = EXCLUDED.name,
+               price_monthly = EXCLUDED.price_monthly,
+               email_limit = EXCLUDED.email_limit,
+               features = EXCLUDED.features,
+               updated_at = NOW();`,
+            [planId, name, priceMonthly, emailLimit, JSON.stringify(features)]
+          );
+          return NextResponse.json({ success: true, message: `Plan '${name}' updated in Supabase.` });
+        } finally {
+          client.release();
+        }
+      }
+
+      const storage = readStorage();
+      const plans = storage.plans || DEFAULT_PLANS;
+      const idx = plans.findIndex((p) => p.id === planId);
+      if (idx >= 0) {
+        plans[idx] = { ...plans[idx], name, price_monthly: priceMonthly, email_limit: emailLimit, features };
+      }
+      writeStorage({ plans });
+      return NextResponse.json({ success: true, message: `Plan '${name}' saved to storage.` });
+    }
+
+    // 5. ACTION: Save / Update SMTP Configuration in Supabase
     if (action === "save_smtp" && smtpConfig) {
       const host = (smtpConfig.host || "smtp-relay.brevo.com").trim();
       const port = parseInt((smtpConfig.port || 587).toString().trim(), 10);
@@ -502,7 +921,7 @@ export async function POST(req) {
       });
     }
 
-    // 3. ACTION: Save / Update Email Gateway & Template Configurations in Supabase
+    // 6. ACTION: Save / Update Email Gateway & Template Configurations in Supabase
     if (action === "save_email_config" && emailConfig) {
       const activeProvider = (emailConfig.provider || "smtp").trim();
       const resendApiKey = (emailConfig.resendKey || "").trim();
@@ -566,7 +985,7 @@ export async function POST(req) {
       });
     }
 
-    // 4. ACTION: Authenticate against Supabase users table
+    // 7. ACTION: Authenticate against Supabase users table
     if (action === "authenticate_user" && authCredentials) {
       const email = (authCredentials.email || "").trim();
       const password = (authCredentials.password || "").trim();
@@ -586,7 +1005,6 @@ export async function POST(req) {
             });
           }
 
-          // Fallback master password for console access
           if (password === "admin123") {
             return NextResponse.json({
               success: true,
@@ -610,7 +1028,7 @@ export async function POST(req) {
       return NextResponse.json({ error: "Invalid operator credentials." }, { status: 401 });
     }
 
-    // 5. ACTION: Synchronize Recipient Records into 'email_records'
+    // 8. ACTION: Synchronize Recipient Records into 'email_records'
     if (!Array.isArray(records)) {
       return NextResponse.json({ error: "Invalid records payload. Expected an array." }, { status: 400 });
     }
@@ -622,15 +1040,17 @@ export async function POST(req) {
 
         for (const rec of records) {
           const recId = rec.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const recTenantId = rec.tenant_id || "default";
           const extraFields = rec.extra_fields ? JSON.stringify(rec.extra_fields) : "{}";
           const sentAt = rec.sent_at ? new Date(rec.sent_at) : null;
           const createdAt = rec.created_at ? new Date(rec.created_at) : new Date();
 
           await client.query(
             `INSERT INTO email_records (
-              id, recipient_email, subject, message, attachment_path, attachment_name, attachment_data, attachment_size, extra_fields, status, status_message, batch_name, sent_at, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+              id, tenant_id, recipient_email, subject, message, attachment_path, attachment_name, attachment_data, attachment_size, extra_fields, status, status_message, batch_name, sent_at, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             ON CONFLICT (id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
               recipient_email = EXCLUDED.recipient_email,
               subject = EXCLUDED.subject,
               message = EXCLUDED.message,
@@ -645,6 +1065,7 @@ export async function POST(req) {
               sent_at = EXCLUDED.sent_at;`,
             [
               recId,
+              recTenantId,
               rec.recipient_email || "",
               rec.subject || "",
               rec.message || "",
@@ -662,6 +1083,12 @@ export async function POST(req) {
           );
         }
 
+        // Increment tenant's used quota if dispatched
+        const sentCount = records.filter((r) => r.status === "sent").length;
+        if (sentCount > 0 && tenantId) {
+          await client.query("UPDATE tenants SET used_quota = used_quota + $1, updated_at = NOW() WHERE id = $2;", [sentCount, tenantId]).catch(() => {});
+        }
+
         return NextResponse.json({
           success: true,
           count: records.length,
@@ -674,7 +1101,7 @@ export async function POST(req) {
       }
     }
 
-    // Fallback to local storage if no database connection string configured
+    // Fallback to local storage
     writeStorage({ records });
 
     return NextResponse.json({

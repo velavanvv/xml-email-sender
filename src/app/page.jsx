@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useMemo, useEffect } from "react";
+import Link from "next/link";
 import {
   UploadCloud,
   FileText,
@@ -46,6 +47,7 @@ import {
   User,
   EyeOff,
   HardDrive,
+  Building2,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
@@ -221,6 +223,7 @@ export default function EnterpriseEmailDashboard() {
   // Domain Verification & Credits Guide Modal
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [guideTab, setGuideTab] = useState("verification"); // "verification" | "credits" | "database"
+  const [activeTenant, setActiveTenant] = useState(null);
 
   // Gateway Configuration
   const [provider, setProvider] = useState("simulation"); // simulation, mailchimp, resend, smtp
@@ -305,6 +308,24 @@ export default function EnterpriseEmailDashboard() {
 
       const savedDbUrl = localStorage.getItem("xml_dispatch_db_url") || "";
       if (savedDbUrl) setCustomDbUrl(savedDbUrl);
+
+      // Check if launched as specific commercial client from SaaS Admin
+      const storedTenant = localStorage.getItem("xml_dispatch_active_tenant");
+      if (storedTenant) {
+        try {
+          const t = JSON.parse(storedTenant);
+          setActiveTenant(t);
+          if (t.sender_email) {
+            setSmtpSettings((prev) => ({
+              ...prev,
+              senderEmail: t.sender_email,
+              senderName: t.sender_name || prev.senderName,
+            }));
+          }
+        } catch (err) {
+          console.warn("Tenant read error", err);
+        }
+      }
     } catch (e) {
       console.warn("Could not read from local storage", e);
     }
@@ -1180,11 +1201,21 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
 
           {/* Right Header Actions */}
           <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* SaaS Admin Portal Button */}
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#1a73e8] bg-[#1a73e8] hover:bg-[#1557b0] text-xs font-semibold text-white shadow-xs transition-colors"
+              title="Open Multi-Tenant SaaS Administration Portal"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>SaaS Admin Portal</span>
+            </Link>
+
             {/* Guide & Domain Verification CTA */}
             <button
               onClick={() => setShowGuideModal(true)}
               title="View Domain Deliverability & Authentication Guide"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#1a73e8] bg-[#e8f0fe] hover:bg-[#d2e3fc] text-xs font-semibold text-[#1a73e8] transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#1a73e8] transition-colors"
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span className="hidden md:inline">Deliverability Guide</span>
@@ -1255,6 +1286,40 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
           </div>
         </div>
       </header>
+
+      {/* Active Commercial Tenant Banner */}
+      {activeTenant && (
+        <div className="bg-[#e8f0fe] border-b border-[#d2e3fc] px-4 sm:px-6 py-2 text-xs flex items-center justify-between animate-fade-in">
+          <div className="flex items-center gap-2.5 text-[#174ea6]">
+            <Building2 className="w-4 h-4 text-[#1a73e8]" />
+            <span>
+              Active Commercial Client: <strong>{activeTenant.name}</strong>
+            </span>
+            <span className="text-[#5f6368] hidden md:inline">
+              &bull; Sender: <code className="bg-white px-1.5 py-0.5 rounded border border-[#d2e3fc]">{activeTenant.sender_email}</code>
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-[#1a73e8] text-white text-[10px] font-bold">
+              {activeTenant.used_quota?.toLocaleString() || 0} / {activeTenant.monthly_quota?.toLocaleString() || 2000} used
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Link href="/admin" className="text-[#1a73e8] hover:underline text-[11px] font-semibold">
+              Manage in Admin &rarr;
+            </Link>
+            <button
+              onClick={() => {
+                localStorage.removeItem("xml_dispatch_active_tenant");
+                setActiveTenant(null);
+                notify("Exited client context. Switched back to master console.", "info");
+              }}
+              className="text-[#d93025] hover:underline text-[11px] font-medium border-l border-[#d2e3fc] pl-3 cursor-pointer"
+            >
+              Exit Client View
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
           2. WORKFLOW STEPPER BANNER
