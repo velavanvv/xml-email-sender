@@ -51,10 +51,12 @@ import {
 } from "lucide-react";
 import confetti from "canvas-confetti";
 
-const SUPABASE_SQL_SCHEMA = `-- CloudMail XML Enterprise Database Schema for Supabase
+const SUPABASE_SQL_SCHEMA = `-- CloudMail XML Multi-Tenant Enterprise Database Schema for Supabase
+
 -- 1. Table: email_records (Recipients, Dispatches & Logs)
 CREATE TABLE IF NOT EXISTS email_records (
   id TEXT PRIMARY KEY,
+  tenant_id TEXT DEFAULT 'default',
   recipient_email TEXT NOT NULL,
   subject TEXT,
   message TEXT,
@@ -73,6 +75,7 @@ CREATE TABLE IF NOT EXISTS email_records (
 -- 2. Table: smtp_configurations (Relay credentials & Verified Senders)
 CREATE TABLE IF NOT EXISTS smtp_configurations (
   id TEXT PRIMARY KEY DEFAULT 'default',
+  tenant_id TEXT DEFAULT 'default',
   host TEXT NOT NULL,
   port INTEGER DEFAULT 587,
   username TEXT NOT NULL,
@@ -86,6 +89,7 @@ CREATE TABLE IF NOT EXISTS smtp_configurations (
 -- 3. Table: email_configurations (Gateway selections, API Keys & Common Templates)
 CREATE TABLE IF NOT EXISTS email_configurations (
   id TEXT PRIMARY KEY DEFAULT 'default',
+  tenant_id TEXT DEFAULT 'default',
   active_provider TEXT DEFAULT 'smtp',
   resend_api_key TEXT,
   resend_from_email TEXT,
@@ -101,12 +105,62 @@ CREATE TABLE IF NOT EXISTS email_configurations (
 -- 4. Table: users (Operator Authentication & Access Control)
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
+  tenant_id TEXT DEFAULT 'default',
   email TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
-  role TEXT DEFAULT 'operator',
+  role TEXT DEFAULT 'company_user',
   last_login_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 5. Table: tenants (Commercial Client Companies)
+CREATE TABLE IF NOT EXISTS tenants (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  contact_email TEXT NOT NULL,
+  sender_email TEXT NOT NULL,
+  sender_name TEXT DEFAULT 'Accounts Dept',
+  plan_id TEXT DEFAULT 'plan_standard',
+  monthly_quota INTEGER DEFAULT 2000,
+  used_quota INTEGER DEFAULT 0,
+  domain_verified BOOLEAN DEFAULT true,
+  status TEXT DEFAULT 'active',
+  monthly_fee NUMERIC DEFAULT 29.00,
+  billing_status TEXT DEFAULT 'paid',
+  subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Table: plans (SaaS Subscription Monetization)
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  price_monthly NUMERIC NOT NULL,
+  email_limit INTEGER NOT NULL,
+  features JSONB DEFAULT '[]'::jsonb,
+  is_active BOOLEAN DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Schema Migrations / Backward Compatibility (Guarantees missing columns exist)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'company_user';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
+ALTER TABLE email_records ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+ALTER TABLE email_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sender_name TEXT DEFAULT 'Accounts Dept';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_id TEXT DEFAULT 'plan_standard';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_quota INTEGER DEFAULT 2000;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS used_quota INTEGER DEFAULT 0;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT true;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC DEFAULT 29.00;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_status TEXT DEFAULT 'paid';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days');
 
 -- Enable Row Level Security (RLS) & default access
 ALTER TABLE email_records ENABLE ROW LEVEL SECURITY;

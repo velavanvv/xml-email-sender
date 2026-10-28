@@ -312,7 +312,25 @@ CREATE TABLE IF NOT EXISTS plans (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Schema Migrations / Column Guarantees
+-- Schema Migrations / Column Guarantees (Prevents column missing errors on existing databases)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'company_user';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
+ALTER TABLE email_records ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+
+ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+
+ALTER TABLE email_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
+
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sender_name TEXT DEFAULT 'Accounts Dept';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_id TEXT DEFAULT 'plan_standard';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_quota INTEGER DEFAULT 2000;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS used_quota INTEGER DEFAULT 0;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT true;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC DEFAULT 29.00;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_status TEXT DEFAULT 'paid';
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days');
 `;
 
@@ -1031,8 +1049,10 @@ export async function POST(req) {
       if (pool) {
         const client = await pool.connect();
         try {
-          await client.query(FULL_SCHEMA_SQL);
-          await client.query(SEED_DATA_SQL);
+          // 1. Run schema and migrations first
+          await client.query(FULL_SCHEMA_SQL).catch((err) => console.warn("Schema migration notice:", err.message));
+          // 2. Run seed data safely
+          await client.query(SEED_DATA_SQL).catch((err) => console.warn("Seed data notice:", err.message));
           const userRes = await client.query(
             "SELECT * FROM users WHERE LOWER(email) = $1 LIMIT 1;",
             [email]
