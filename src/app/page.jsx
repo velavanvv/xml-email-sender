@@ -167,44 +167,108 @@ ALTER TABLE email_records ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow all access" ON email_records;
 CREATE POLICY "Allow all access" ON email_records FOR ALL USING (true);`;
 
-const DEFAULT_DEMO_RECORDS = [
-  {
-    id: "rec_demo_1",
-    recipient_email: "alex.turner@example.com",
-    subject: "Monthly Statement - October 2026",
-    message: "Hi Alex, please find your monthly summary statement attached. Contact our accounts team if you have any questions.",
-    attachment_path: "/invoices/2026/alex_october_invoice.pdf",
-    extra_fields: { name: "Alex Turner", account_no: "ACC-8921", balance: "$450.00" },
-    status: "pending",
-    status_message: "",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "rec_demo_2",
-    recipient_email: "sarah.jenkins@acmecorp.io",
-    subject: "Contract Agreement & Verification",
-    message: "Dear Sarah, attached is the revised NDA and enterprise service contract for your review and execution.",
-    attachment_path: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-    extra_fields: { name: "Sarah Jenkins", company: "Acme Corp", dept: "Procurement" },
-    status: "pending",
-    status_message: "",
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: "rec_demo_3",
-    recipient_email: "billing@globex.org",
-    subject: "Payment Reminder #542",
-    message: "Hello team, kindly process invoice #542 due on October 30. Details and wire instructions are attached.",
-    attachment_path: "/receipts/globex_542.pdf",
-    extra_fields: { name: "Globex Accounts", po_number: "PO-7741", due_date: "Oct 30" },
-    status: "pending",
-    status_message: "",
-    created_at: new Date().toISOString(),
-  },
-];
+// Isolated Tenant Default Records (Ensuring each customer only sees their own client emails)
+const TENANT_DEFAULT_RECORDS = {
+  tenant_acme: [
+    {
+      id: "rec_acme_1",
+      tenant_id: "tenant_acme",
+      recipient_email: "sarah.jenkins@acmecorp.com",
+      subject: "Acme Global - October Commercial Invoice #ACM-891",
+      message: "Dear Sarah, please find your Acme Global monthly commercial invoice attached for settlement.",
+      attachment_path: "/invoices/2026/acme_invoice_891.pdf",
+      attachment_name: "acme_invoice_891.pdf",
+      extra_fields: { name: "Sarah Jenkins", company: "Acme Corp", dept: "Procurement", invoice_id: "ACM-891" },
+      status: "sent",
+      status_message: "Delivered to Primary Inbox",
+      batch_name: "Acme_Oct_Batch",
+      created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+      sent_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    },
+    {
+      id: "rec_acme_2",
+      tenant_id: "tenant_acme",
+      recipient_email: "david.lee@acmeglobal.com",
+      subject: "Acme Assembly - Industrial Parts Supply Statement",
+      message: "Hi David, parts delivery and assembly inventory statement attached for your review.",
+      attachment_path: "/invoices/2026/acme_parts_statement.pdf",
+      attachment_name: "acme_parts_statement.pdf",
+      extra_fields: { name: "David Lee", company: "Acme Global", dept: "Assembly", invoice_id: "ACM-892" },
+      status: "pending",
+      status_message: "",
+      batch_name: "Acme_Oct_Batch",
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+    },
+  ],
+  tenant_globex: [
+    {
+      id: "rec_globex_1",
+      tenant_id: "tenant_globex",
+      recipient_email: "dispatch@globex.org",
+      subject: "Globex Freight - Shipping Manifest #GLX-99",
+      message: "Clearance airway bill, air freight cargo details and customs documentation attached.",
+      attachment_path: "/manifests/globex_airway_bill.pdf",
+      attachment_name: "globex_airway_bill.pdf",
+      extra_fields: { name: "Globex Shipping", tracking: "GLX-99201", origin: "Frankfurt", dest: "Chicago" },
+      status: "sent",
+      status_message: "Delivered to Primary Inbox",
+      batch_name: "Globex_Dispatch_Oct",
+      created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+      sent_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    },
+    {
+      id: "rec_globex_2",
+      tenant_id: "tenant_globex",
+      recipient_email: "elena.rostova@globex-freight.com",
+      subject: "Globex Demurrage & Terminal Surcharge Advice",
+      message: "Carrier payment advice, terminal storage breakdown and customs invoice attached.",
+      attachment_path: "/receipts/globex_carrier_payment.pdf",
+      attachment_name: "globex_carrier_payment.pdf",
+      extra_fields: { name: "Elena Rostova", route: "Pacific-Northwest", settlement_id: "SET-4412" },
+      status: "pending",
+      status_message: "",
+      batch_name: "Globex_Dispatch_Oct",
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+    },
+  ],
+  tenant_apex: [
+    {
+      id: "rec_apex_1",
+      tenant_id: "tenant_apex",
+      recipient_email: "jennifer@apexclients.com",
+      subject: "Apex Financial - Quarterly Dividend Advice",
+      message: "Dear Jennifer, your private portfolio dividend notice and tax withholding summary are attached.",
+      attachment_path: "/statements/apex_q3_dividend.pdf",
+      attachment_name: "apex_q3_dividend.pdf",
+      extra_fields: { name: "Jennifer Hayes", portfolio_no: "APX-90021", dividend: "$1,450.00" },
+      status: "sent",
+      status_message: "Delivered to Primary Inbox",
+      batch_name: "Apex_Quarterly_Oct",
+      created_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+      sent_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+    },
+  ],
+  tenant_sterling: [
+    {
+      id: "rec_sterling_1",
+      tenant_id: "tenant_sterling",
+      recipient_email: "rchen@sterlinghealth.io",
+      subject: "Sterling Health - Diagnostic Pathology Report #SH-7712",
+      message: "Dr. Chen, verified patient diagnostic lab results and histology reports are encrypted and attached.",
+      attachment_path: "/lab_reports/sterling_7712.pdf",
+      attachment_name: "sterling_7712.pdf",
+      extra_fields: { name: "Dr. Robert Chen", patient_ref: "PT-88124", clinic: "Cardiology" },
+      status: "sent",
+      status_message: "Delivered to Primary Inbox",
+      batch_name: "Sterling_Lab_Oct",
+      created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+      sent_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+    },
+  ],
+};
 
 export default function EnterpriseEmailDashboard() {
-  const [records, setRecords] = useState(DEFAULT_DEMO_RECORDS);
+  const [records, setRecords] = useState([]);
   const [isClientLoaded, setIsClientLoaded] = useState(false);
 
   // Selection
@@ -281,6 +345,15 @@ export default function EnterpriseEmailDashboard() {
   const [guideTab, setGuideTab] = useState("verification"); // "verification" | "credits" | "database"
   const [activeTenant, setActiveTenant] = useState(null);
 
+  // Customer Self-Service Password Security Modal
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: "",
+    confirmPassword: "",
+    showPass: false,
+    isLoading: false,
+  });
+
   // Gateway Configuration
   const [provider, setProvider] = useState("simulation"); // simulation, mailchimp, resend, smtp
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -331,13 +404,6 @@ export default function EnterpriseEmailDashboard() {
   useEffect(() => {
     setIsClientLoaded(true);
     try {
-      const saved = localStorage.getItem("xml_dispatch_records");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setRecords(parsed);
-        }
-      }
       const savedCfg = localStorage.getItem("xml_dispatch_config");
       if (savedCfg) {
         const cfg = JSON.parse(savedCfg);
@@ -381,6 +447,19 @@ export default function EnterpriseEmailDashboard() {
         try {
           const t = JSON.parse(storedTenant);
           setActiveTenant(t);
+
+          // Strictly load isolated client records for this specific customer
+          const tenantKey = `xml_dispatch_records_${t.id}`;
+          const savedTenantRecs = localStorage.getItem(tenantKey);
+          if (savedTenantRecs) {
+            const parsed = JSON.parse(savedTenantRecs);
+            if (Array.isArray(parsed)) setRecords(parsed);
+          } else if (TENANT_DEFAULT_RECORDS[t.id]) {
+            setRecords(TENANT_DEFAULT_RECORDS[t.id]);
+          } else {
+            setRecords([]);
+          }
+
           if (t.smtp_host) {
             setSmtpSettings({
               host: t.smtp_host,
@@ -406,15 +485,15 @@ export default function EnterpriseEmailDashboard() {
     }
   }, []);
 
-  // Save to LocalStorage
+  // Save isolated records to LocalStorage strictly per tenant
   useEffect(() => {
-    if (!isClientLoaded) return;
+    if (!isClientLoaded || !activeTenant?.id) return;
     try {
-      localStorage.setItem("xml_dispatch_records", JSON.stringify(records));
+      localStorage.setItem(`xml_dispatch_records_${activeTenant.id}`, JSON.stringify(records));
     } catch (e) {
       console.warn("Could not save records to local storage", e);
     }
-  }, [records, isClientLoaded]);
+  }, [records, isClientLoaded, activeTenant?.id]);
 
   // Authentication Handlers (Separate Company Login vs Admin Login)
   const handleLogin = async (e) => {
@@ -464,6 +543,23 @@ export default function EnterpriseEmailDashboard() {
         if (data.tenant) {
           setActiveTenant(data.tenant);
           localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(data.tenant));
+
+          // Strictly load isolated customer records
+          const tenantKey = `xml_dispatch_records_${data.tenant.id}`;
+          const savedRecs = localStorage.getItem(tenantKey);
+          if (savedRecs) {
+            try {
+              const parsed = JSON.parse(savedRecs);
+              if (Array.isArray(parsed)) setRecords(parsed);
+            } catch {
+              setRecords(TENANT_DEFAULT_RECORDS[data.tenant.id] || []);
+            }
+          } else if (TENANT_DEFAULT_RECORDS[data.tenant.id]) {
+            setRecords(TENANT_DEFAULT_RECORDS[data.tenant.id]);
+          } else {
+            setRecords([]);
+          }
+
           if (data.tenant.smtp_host) {
             setSmtpSettings({
               host: data.tenant.smtp_host,
@@ -527,6 +623,20 @@ export default function EnterpriseEmailDashboard() {
       };
       setActiveTenant(demoTenant);
       localStorage.setItem("xml_dispatch_active_tenant", JSON.stringify(demoTenant));
+
+      const tenantKey = `xml_dispatch_records_${demoTenant.id}`;
+      const savedRecs = localStorage.getItem(tenantKey);
+      if (savedRecs) {
+        try {
+          const parsed = JSON.parse(savedRecs);
+          if (Array.isArray(parsed)) setRecords(parsed);
+        } catch {
+          setRecords(TENANT_DEFAULT_RECORDS[demoTenant.id] || []);
+        }
+      } else {
+        setRecords(TENANT_DEFAULT_RECORDS[demoTenant.id] || []);
+      }
+
       notify(`Welcome ${demoTenant.name}. Signed into Company Console.`, "success");
     } else {
       setAuthError("Invalid credentials. Please verify your password.");
@@ -541,8 +651,52 @@ export default function EnterpriseEmailDashboard() {
     localStorage.removeItem("xml_dispatch_active_tenant");
     setIsAuthenticated(false);
     setActiveTenant(null);
+    setRecords([]);
     setAuthPasscode("");
     notify("Workspace session locked.", "info");
+  };
+
+  // Change Customer Password Handler
+  const handleChangePassword = async (e) => {
+    e?.preventDefault();
+    if (!passwordForm.newPassword || passwordForm.newPassword.trim().length < 6) {
+      notify("New password must be at least 6 characters.", "error");
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      notify("Passwords do not match. Please re-type identical passwords.", "error");
+      return;
+    }
+
+    setPasswordForm((p) => ({ ...p, isLoading: true }));
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (customDbUrl.trim()) headers["x-database-url"] = customDbUrl.trim();
+
+      const res = await fetch("/api/db", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: "change_password",
+          tenantId: activeTenant?.id || "",
+          email: activeTenant?.contact_email || authUser || "",
+          newPassword: passwordForm.newPassword.trim(),
+          connectionString: customDbUrl.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notify("Password updated successfully! Please use your new password on next login.", "success");
+        setShowPasswordModal(false);
+        setPasswordForm({ newPassword: "", confirmPassword: "", showPass: false, isLoading: false });
+      } else {
+        notify(data.error || "Failed to update password.", "error");
+      }
+    } catch {
+      notify("Network error while communicating with server.", "error");
+    } finally {
+      setPasswordForm((p) => ({ ...p, isLoading: false }));
+    }
   };
 
   // Free Hosted Cloud DB Handlers
@@ -697,6 +851,7 @@ export default function EnterpriseEmailDashboard() {
         headers,
         body: JSON.stringify({
           records,
+          tenant_id: activeTenant?.id || undefined,
           connectionString: customDbUrl.trim() || undefined,
         }),
       });
@@ -714,7 +869,8 @@ export default function EnterpriseEmailDashboard() {
     }
   };
 
-  const loadFromCloudDb = async () => {
+  const loadFromCloudDb = async (targetTenantId) => {
+    const tid = targetTenantId || activeTenant?.id;
     if (customDbUrl.includes("db.") && customDbUrl.includes(".supabase.co")) {
       notify("Direct host 'db.*' is IPv6-only. Switch to Connection Pooler URI (port 6543) in Settings.", "error");
       return;
@@ -723,9 +879,13 @@ export default function EnterpriseEmailDashboard() {
     try {
       const headers = {};
       let url = "/api/db?action=load_all";
+      if (tid) {
+        url += `&tenantId=${encodeURIComponent(tid)}`;
+        headers["x-tenant-id"] = tid;
+      }
       if (customDbUrl.trim()) {
         headers["x-database-url"] = customDbUrl.trim();
-        url = `/api/db?action=load_all&connectionString=${encodeURIComponent(customDbUrl.trim())}`;
+        url += `&connectionString=${encodeURIComponent(customDbUrl.trim())}`;
       }
       const res = await fetch(url, { headers });
       const data = await parseApiResponse(res);
@@ -862,11 +1022,19 @@ export default function EnterpriseEmailDashboard() {
   // Filtered records
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
+      if (!r) return false;
+      const q = (searchQuery || "").trim().toLowerCase();
+      const recEmail = (r.recipient_email || "").toLowerCase();
+      const recSub = (r.subject || "").toLowerCase();
+      const recMsg = (r.message || "").toLowerCase();
+      const recAtt = (r.attachment_path ? String(r.attachment_path) : "").toLowerCase();
+
       const matchesSearch =
-        r.recipient_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        r.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        r.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (r.attachment_path && r.attachment_path.toLowerCase().includes(searchQuery.toLowerCase()));
+        !q ||
+        recEmail.includes(q) ||
+        recSub.includes(q) ||
+        recMsg.includes(q) ||
+        recAtt.includes(q);
 
       const matchesStatus = statusFilter === "all" ? true : r.status === statusFilter;
       const matchesBatch = batchFilter === "all" ? true : r.batch_name === batchFilter;
@@ -1546,6 +1714,19 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
               )}
               <span className="truncate max-w-[150px]">{authUser}</span>
             </div>
+
+            {/* Change Portal Password */}
+            <button
+              onClick={() => {
+                setPasswordForm({ newPassword: "", confirmPassword: "", showPass: false, isLoading: false });
+                setShowPasswordModal(true);
+              }}
+              title="Change your customer portal login password"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#3c4043] hover:text-[#1a73e8] transition-colors"
+            >
+              <Key className="w-3.5 h-3.5 text-[#5f6368]" />
+              <span className="hidden sm:inline">Change Password</span>
+            </button>
 
             {/* Lock / Sign Out */}
             <button
@@ -2298,10 +2479,10 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                           {r.attachment_path ? (
                             <div
                               className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#f1f3f4] border border-[#dadce0] text-xs text-[#3c4043] max-w-[180px] truncate"
-                              title={r.attachment_path}
+                              title={String(r.attachment_path)}
                             >
                               <Paperclip className="w-3 h-3 text-[#5f6368] shrink-0" />
-                              <span className="truncate">{r.attachment_path.split("/").pop()}</span>
+                              <span className="truncate">{String(r.attachment_path).split("/").pop()}</span>
                             </div>
                           ) : (
                             <span className="text-[#80868b] text-xs">None</span>
@@ -2310,20 +2491,27 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
 
                         {/* Custom Fields */}
                         <td>
-                          {r.extra_fields && Object.keys(r.extra_fields).length > 0 ? (
-                            <div className="flex flex-wrap gap-1 max-w-xs">
-                              {Object.entries(r.extra_fields).map(([k, v]) => (
-                                <span
-                                  key={k}
-                                  className="text-[11px] px-1.5 py-0.5 rounded bg-[#f1f3f4] text-[#3c4043] border border-[#dadce0]"
-                                >
-                                  {k}: <strong className="text-[#202124] font-medium">{String(v)}</strong>
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-[#80868b] text-xs">—</span>
-                          )}
+                          {(() => {
+                            let fields = r.extra_fields;
+                            if (typeof fields === "string") {
+                              try { fields = JSON.parse(fields); } catch { fields = null; }
+                            }
+                            if (fields && typeof fields === "object" && Object.keys(fields).length > 0) {
+                              return (
+                                <div className="flex flex-wrap gap-1 max-w-xs">
+                                  {Object.entries(fields).map(([k, v]) => (
+                                    <span
+                                      key={k}
+                                      className="text-[11px] px-1.5 py-0.5 rounded bg-[#f1f3f4] text-[#3c4043] border border-[#dadce0]"
+                                    >
+                                      {k}: <strong className="text-[#202124] font-medium">{String(v)}</strong>
+                                    </span>
+                                  ))}
+                                </div>
+                              );
+                            }
+                            return <span className="text-[#80868b] text-xs">—</span>;
+                          })()}
                         </td>
 
                         {/* Sent Date / Created Date */}
@@ -2652,6 +2840,102 @@ billing@globex.org,David Miller,Payment Reminder #542,"Hello team, kindly proces
                 <span>Send This Email Now</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          CUSTOMER CHANGE PASSWORD SECURITY MODAL
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#202124]/50 backdrop-blur-xs">
+          <div className="bg-white w-full max-w-md rounded-xl border border-[#dadce0] shadow-2xl p-6 animate-fade-in text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-[#dadce0]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#e8f0fe] text-[#1a73e8] flex items-center justify-center">
+                  <Key className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[#202124]">Update Portal Password</h3>
+                  <p className="text-[11px] text-[#5f6368]">
+                    Account: <strong className="text-[#202124]">{activeTenant?.contact_email || authUser}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPasswordModal(false)}
+                className="p-1 rounded-md text-[#5f6368] hover:bg-[#f1f3f4]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePassword} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-[#202124] font-medium text-xs mb-1">New Password</label>
+                <div className="relative">
+                  <input
+                    type={passwordForm.showPass ? "text" : "password"}
+                    value={passwordForm.newPassword}
+                    onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                    placeholder="Minimum 6 characters..."
+                    required
+                    minLength={6}
+                    className="w-full bg-white border border-[#dadce0] rounded-md pl-3 pr-10 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPasswordForm({ ...passwordForm, showPass: !passwordForm.showPass })}
+                    className="absolute right-2.5 top-2 text-[#5f6368] hover:text-[#202124]"
+                  >
+                    {passwordForm.showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[#202124] font-medium text-xs mb-1">Confirm New Password</label>
+                <input
+                  type={passwordForm.showPass ? "text" : "password"}
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  placeholder="Re-type new password..."
+                  required
+                  minLength={6}
+                  className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
+                />
+              </div>
+
+              <div className="p-3 bg-[#f8f9fa] rounded-lg border border-[#dadce0] text-[11px] text-[#5f6368] space-y-1">
+                <span className="font-semibold text-[#202124] flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#1e8e3e]" />
+                  Password Security Rules
+                </span>
+                <p>Changing your password immediately updates your database login credentials in Supabase.</p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-[#dadce0]">
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="px-4 py-2 rounded-md border border-[#dadce0] bg-white hover:bg-[#f8f9fa] text-xs font-medium text-[#5f6368]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={passwordForm.isLoading}
+                  className="px-4 py-2 rounded-md bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-semibold shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {passwordForm.isLoading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle className="w-3.5 h-3.5" />
+                  )}
+                  <span>Save New Password</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

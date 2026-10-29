@@ -66,10 +66,12 @@ export default function SaaSAdminPortal() {
   // Onboard / Edit Tenant Modal
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [editingTenant, setEditingTenant] = useState(null);
+  const [showTenantPass, setShowTenantPass] = useState(false);
   const [tenantForm, setTenantForm] = useState({
     id: "",
     name: "",
     contact_email: "",
+    password: "",
     sender_email: "",
     sender_name: "Accounts Department",
     plan_id: "plan_standard",
@@ -649,6 +651,7 @@ export default function SaaSAdminPortal() {
                   id: "",
                   name: "",
                   contact_email: "",
+                  password: "admin123",
                   sender_email: "",
                   sender_name: "Accounts Department",
                   plan_id: "plan_standard",
@@ -868,6 +871,7 @@ export default function SaaSAdminPortal() {
                                     id: tenant.id,
                                     name: tenant.name,
                                     contact_email: tenant.contact_email,
+                                    password: "",
                                     sender_email: tenant.sender_email,
                                     sender_name: tenant.sender_name || "Accounts Dept",
                                     plan_id: tenant.plan_id || "plan_standard",
@@ -1211,6 +1215,34 @@ export default function SaaSAdminPortal() {
                     className="w-full bg-white border border-[#dadce0] rounded-md px-3 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
                   />
                 </div>
+              </div>
+
+              {/* Customer Portal Login Password */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[#202124] font-medium text-xs">Customer Portal Login Password</label>
+                  <span className="text-[10px] text-[#5f6368]">{editingTenant ? "(Leave empty to keep existing password)" : "(Default: admin123)"}</span>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showTenantPass ? "text" : "password"}
+                    value={tenantForm.password || ""}
+                    onChange={(e) => setTenantForm({ ...tenantForm, password: e.target.value })}
+                    placeholder={editingTenant ? "Enter new password to update..." : "Set initial customer portal password (e.g. admin123)"}
+                    className="w-full bg-white border border-[#dadce0] rounded-md pl-3 pr-10 py-2 text-xs text-[#202124] focus:outline-none focus:border-[#1a73e8]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTenantPass(!showTenantPass)}
+                    className="absolute right-2.5 top-2 text-[#5f6368] hover:text-[#202124]"
+                    title={showTenantPass ? "Hide password" : "Show password"}
+                  >
+                    {showTenantPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#5f6368] mt-1">
+                  The customer will use their Contact Email (<strong className="text-[#202124]">{tenantForm.contact_email || "contact@email"}</strong>) and this password to sign into their company console.
+                </p>
               </div>
 
               <div className="p-3 bg-[#e8f0fe] rounded-lg border border-[#d2e3fc] space-y-1">

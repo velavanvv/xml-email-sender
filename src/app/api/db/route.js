@@ -9,35 +9,95 @@ export const runtime = "nodejs";
 const { Pool } = pg;
 const MOCK_STORAGE_FILE = path.join("/tmp", "xml_dispatch_cloud_db.json");
 
-// Default initial records if database is empty
+// Default initial records per tenant (ensuring complete multi-tenant client isolation)
 const DEFAULT_CLOUD_RECORDS = [
   {
-    id: "rec_cloud_demo_1",
+    id: "rec_acme_1",
     tenant_id: "tenant_acme",
-    recipient_email: "alex.turner@example.com",
-    subject: "Monthly Statement - October 2026",
-    message: "Hi Alex, please find your monthly summary statement attached. Contact our accounts team if you have any questions.",
-    attachment_path: "/invoices/2026/alex_october_invoice.pdf",
-    attachment_name: "alex_october_invoice.pdf",
-    extra_fields: { name: "Alex Turner", account_no: "ACC-8921", balance: "$450.00" },
-    status: "pending",
-    status_message: "",
-    batch_name: "Cloud_Hosted_Demo",
-    created_at: new Date().toISOString(),
+    recipient_email: "sarah.jenkins@acmecorp.com",
+    subject: "Acme Global - October Commercial Invoice #ACM-891",
+    message: "Dear Sarah, please find your Acme Global monthly commercial invoice attached for settlement.",
+    attachment_path: "/invoices/2026/acme_invoice_891.pdf",
+    attachment_name: "acme_invoice_891.pdf",
+    extra_fields: { name: "Sarah Jenkins", company: "Acme Corp", dept: "Procurement", invoice_id: "ACM-891" },
+    status: "sent",
+    status_message: "Delivered to Primary Inbox",
+    batch_name: "Acme_Oct_Batch",
+    created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+    sent_at: new Date(Date.now() - 2 * 86400000).toISOString(),
   },
   {
-    id: "rec_cloud_demo_2",
-    tenant_id: "tenant_globex",
-    recipient_email: "sarah.jenkins@acmecorp.io",
-    subject: "Contract Agreement & Verification",
-    message: "Dear Sarah, attached is the revised NDA and enterprise service contract for your review and execution.",
-    attachment_path: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-    attachment_name: "enterprise_contract.pdf",
-    extra_fields: { name: "Sarah Jenkins", company: "Acme Corp", dept: "Procurement" },
+    id: "rec_acme_2",
+    tenant_id: "tenant_acme",
+    recipient_email: "david.lee@acmeglobal.com",
+    subject: "Acme Assembly - Industrial Parts Supply Statement",
+    message: "Hi David, parts delivery and assembly inventory statement attached for your review.",
+    attachment_path: "/invoices/2026/acme_parts_statement.pdf",
+    attachment_name: "acme_parts_statement.pdf",
+    extra_fields: { name: "David Lee", company: "Acme Global", dept: "Assembly", invoice_id: "ACM-892" },
     status: "pending",
     status_message: "",
-    batch_name: "Cloud_Hosted_Demo",
-    created_at: new Date().toISOString(),
+    batch_name: "Acme_Oct_Batch",
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_globex_1",
+    tenant_id: "tenant_globex",
+    recipient_email: "dispatch@globex.org",
+    subject: "Globex Freight - Shipping Manifest #GLX-99",
+    message: "Clearance airway bill, air freight cargo details and customs documentation attached.",
+    attachment_path: "/manifests/globex_airway_bill.pdf",
+    attachment_name: "globex_airway_bill.pdf",
+    extra_fields: { name: "Globex Shipping", tracking: "GLX-99201", origin: "Frankfurt", dest: "Chicago" },
+    status: "sent",
+    status_message: "Delivered to Primary Inbox",
+    batch_name: "Globex_Dispatch_Oct",
+    created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    sent_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+  },
+  {
+    id: "rec_globex_2",
+    tenant_id: "tenant_globex",
+    recipient_email: "elena.rostova@globex-freight.com",
+    subject: "Globex Demurrage & Terminal Surcharge Advice",
+    message: "Carrier payment advice, terminal storage breakdown and customs invoice attached.",
+    attachment_path: "/receipts/globex_carrier_payment.pdf",
+    attachment_name: "globex_carrier_payment.pdf",
+    extra_fields: { name: "Elena Rostova", route: "Pacific-Northwest", settlement_id: "SET-4412" },
+    status: "pending",
+    status_message: "",
+    batch_name: "Globex_Dispatch_Oct",
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "rec_apex_1",
+    tenant_id: "tenant_apex",
+    recipient_email: "jennifer@apexclients.com",
+    subject: "Apex Financial - Quarterly Dividend Advice",
+    message: "Dear Jennifer, your private portfolio dividend notice and tax withholding summary are attached.",
+    attachment_path: "/statements/apex_q3_dividend.pdf",
+    attachment_name: "apex_q3_dividend.pdf",
+    extra_fields: { name: "Jennifer Hayes", portfolio_no: "APX-90021", dividend: "$1,450.00" },
+    status: "sent",
+    status_message: "Delivered to Primary Inbox",
+    batch_name: "Apex_Quarterly_Oct",
+    created_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+    sent_at: new Date(Date.now() - 4 * 86400000).toISOString(),
+  },
+  {
+    id: "rec_sterling_1",
+    tenant_id: "tenant_sterling",
+    recipient_email: "rchen@sterlinghealth.io",
+    subject: "Sterling Health - Diagnostic Pathology Report #SH-7712",
+    message: "Dr. Chen, verified patient diagnostic lab results and histology reports are encrypted and attached.",
+    attachment_path: "/lab_reports/sterling_7712.pdf",
+    attachment_name: "sterling_7712.pdf",
+    extra_fields: { name: "Dr. Robert Chen", patient_ref: "PT-88124", clinic: "Cardiology" },
+    status: "sent",
+    status_message: "Delivered to Primary Inbox",
+    batch_name: "Sterling_Lab_Oct",
+    created_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+    sent_at: new Date(Date.now() - 5 * 86400000).toISOString(),
   },
 ];
 
@@ -262,9 +322,163 @@ const DEFAULT_TENANTS = [
   },
 ];
 
-// Full DDL schema for Multi-Tenant Supabase tables
+// Resilient Schema Migrations: executes each DDL statement individually so failure in one never aborts others
+export async function runSchemaMigrations(client) {
+  const migrations = [
+    // 1. users table & column migrations
+    `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT DEFAULT 'company_user', tenant_id TEXT DEFAULT 'default', created_at TIMESTAMPTZ DEFAULT NOW());`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'company_user';`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();`,
+
+    // 2. email_records table & column migrations
+    `CREATE TABLE IF NOT EXISTS email_records (id TEXT PRIMARY KEY, tenant_id TEXT DEFAULT 'default', recipient_email TEXT NOT NULL, subject TEXT, message TEXT, attachment_path TEXT, attachment_name TEXT, attachment_data TEXT, attachment_size TEXT, extra_fields JSONB DEFAULT '{}'::jsonb, status TEXT DEFAULT 'pending', status_message TEXT, batch_name TEXT, sent_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW());`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS recipient_email TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS subject TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS message TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS attachment_path TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS attachment_name TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS attachment_data TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS attachment_size TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS extra_fields JSONB DEFAULT '{}'::jsonb;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS status_message TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS batch_name TEXT;`,
+    `ALTER TABLE email_records ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;`,
+
+    // 3. smtp_configurations table & column migrations
+    `CREATE TABLE IF NOT EXISTS smtp_configurations (id TEXT PRIMARY KEY DEFAULT 'default', tenant_id TEXT DEFAULT 'default', host TEXT NOT NULL, port INTEGER DEFAULT 587, username TEXT NOT NULL, password TEXT NOT NULL, sender_email TEXT, sender_name TEXT, is_active BOOLEAN DEFAULT true, updated_at TIMESTAMPTZ DEFAULT NOW());`,
+    `ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';`,
+    `ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS host TEXT;`,
+    `ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS port INTEGER DEFAULT 587;`,
+    `ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS username TEXT;`,
+    `ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS password TEXT;`,
+    `ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS sender_email TEXT;`,
+    `ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS sender_name TEXT;`,
+
+    // 4. email_configurations table & column migrations
+    `CREATE TABLE IF NOT EXISTS email_configurations (id TEXT PRIMARY KEY DEFAULT 'default', tenant_id TEXT DEFAULT 'default', active_provider TEXT DEFAULT 'smtp', resend_api_key TEXT, resend_from_email TEXT, mailchimp_api_key TEXT, mailchimp_from_email TEXT, mailchimp_from_name TEXT, use_common_body BOOLEAN DEFAULT false, common_subject TEXT, common_body_template TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());`,
+    `ALTER TABLE email_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';`,
+    `ALTER TABLE email_configurations ADD COLUMN IF NOT EXISTS active_provider TEXT DEFAULT 'smtp';`,
+
+    // 5. plans table & column migrations
+    `CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, price_monthly NUMERIC NOT NULL, email_limit INTEGER NOT NULL, features JSONB DEFAULT '[]'::jsonb, is_active BOOLEAN DEFAULT true, updated_at TIMESTAMPTZ DEFAULT NOW());`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS name TEXT;`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS price_monthly NUMERIC DEFAULT 29.00;`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS email_limit INTEGER DEFAULT 2000;`,
+    `ALTER TABLE plans ADD COLUMN IF NOT EXISTS features JSONB DEFAULT '[]'::jsonb;`,
+
+    // 6. tenants table & column migrations
+    `CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, contact_email TEXT NOT NULL, sender_email TEXT NOT NULL, sender_name TEXT DEFAULT 'Accounts Dept', plan_id TEXT DEFAULT 'plan_standard', monthly_quota INTEGER DEFAULT 2000, used_quota INTEGER DEFAULT 0, domain_verified BOOLEAN DEFAULT true, status TEXT DEFAULT 'active', monthly_fee NUMERIC DEFAULT 29.00, billing_status TEXT DEFAULT 'paid', subscription_renews_at TIMESTAMPTZ DEFAULT NOW(), smtp_host TEXT, smtp_port INTEGER DEFAULT 587, smtp_user TEXT, smtp_pass TEXT, smtp_sender_email TEXT, smtp_sender_name TEXT, gateway_provider TEXT DEFAULT 'smtp', created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sender_name TEXT DEFAULT 'Accounts Dept';`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_id TEXT DEFAULT 'plan_standard';`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_quota INTEGER DEFAULT 2000;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS used_quota INTEGER DEFAULT 0;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT true;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC DEFAULT 29.00;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_status TEXT DEFAULT 'paid';`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMPTZ DEFAULT NOW();`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_host TEXT;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_user TEXT;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_pass TEXT;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_sender_email TEXT;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_sender_name TEXT;`,
+    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS gateway_provider TEXT DEFAULT 'smtp';`,
+  ];
+
+  for (const sql of migrations) {
+    try {
+      await client.query(sql);
+    } catch {
+      // Individual step error non-blocking
+    }
+  }
+}
+
+// Resilient individual seeding
+export async function seedDefaultData(client) {
+  // 1. Seed Plans
+  const plans = [
+    ['plan_starter', 'Starter Tier', 19.00, 2000, JSON.stringify(["2,000 Verified Emails / Mo", "1 Custom Verified Domain", "XML & CSV Ingestion", "Standard Relay Access"])],
+    ['plan_standard', 'Standard Business', 29.00, 5000, JSON.stringify(["5,000 Verified Emails / Mo", "3 Custom Verified Domains", "Automated PDF Attachments", "Priority Queue", "Detailed Delivery Logs"])],
+    ['plan_enterprise', 'Enterprise Tier', 49.00, 15000, JSON.stringify(["15,000 Verified Emails / Mo", "Unlimited Verified Domains", "Dedicated High-Speed Relay", "Custom DKIM & SPF Alignment", "24/7 SLA Support"])],
+  ];
+  for (const [id, name, price, limit, feats] of plans) {
+    await client.query(
+      `INSERT INTO plans (id, name, price_monthly, email_limit, features) VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (id) DO NOTHING;`,
+      [id, name, price, limit, feats]
+    ).catch(() => {});
+  }
+
+  // 2. Seed Default Admin and Initial Company Users
+  const users = [
+    ['usr_admin_default', 'default', 'admin@enterprise.internal', 'admin123', 'administrator'],
+    ['usr_acme', 'tenant_acme', 'admin@acmecorp.com', 'admin123', 'company_user'],
+    ['usr_globex', 'tenant_globex', 'dispatch@globex.org', 'admin123', 'company_user'],
+    ['usr_apex', 'tenant_apex', 'billing@apexfinancial.com', 'admin123', 'company_user'],
+    ['usr_sterling', 'tenant_sterling', 'it@sterlinghealth.io', 'admin123', 'company_user'],
+    ['usr_nexus', 'tenant_nexus', 'ops@nexusretail.com', 'admin123', 'company_user'],
+    ['usr_vanguard', 'tenant_vanguard', 'leases@vanguardprop.com', 'admin123', 'company_user'],
+  ];
+  for (const [id, tenantId, email, pass, role] of users) {
+    await client.query(
+      `INSERT INTO users (id, tenant_id, email, password, role, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) ON CONFLICT (id) DO NOTHING;`,
+      [id, tenantId, email, pass, role]
+    ).catch(() => {});
+  }
+
+  // 3. Seed Corporate Tenants
+  for (const t of DEFAULT_TENANTS) {
+    await client.query(
+      `INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_sender_email, smtp_sender_name, gateway_provider)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+       ON CONFLICT (id) DO NOTHING;`,
+      [t.id, t.name, t.contact_email, t.sender_email, t.sender_name || 'Accounts Dept', t.plan_id || 'plan_standard', t.monthly_quota || 2000, t.used_quota || 0, t.domain_verified !== false, t.status || 'active', t.monthly_fee || 29.00, t.billing_status || 'paid', t.smtp_host || 'smtp-relay.brevo.com', t.smtp_port || 587, t.smtp_user || '', t.smtp_pass || '', t.smtp_sender_email || t.sender_email, t.smtp_sender_name || t.sender_name, t.gateway_provider || 'smtp']
+    ).catch(() => {});
+  }
+
+  // 4. Seed Isolated Default Records
+  for (const r of DEFAULT_CLOUD_RECORDS) {
+    await client.query(
+      `INSERT INTO email_records (id, tenant_id, recipient_email, subject, message, status, status_message, batch_name, extra_fields, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
+       ON CONFLICT (id) DO NOTHING;`,
+      [r.id, r.tenant_id, r.recipient_email, r.subject, r.message, r.status, r.status_message || '', r.batch_name || 'Initial_Batch', JSON.stringify(r.extra_fields || {})]
+    ).catch(() => {});
+  }
+
+  // 5. Seed default SMTP config
+  await client.query(
+    `INSERT INTO smtp_configurations (id, tenant_id, host, port, username, password, sender_email, sender_name, is_active, updated_at)
+     VALUES ('default', 'default', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', '', 'velavanvelavan790@gmail.com', 'CloudMail Team', true, NOW())
+     ON CONFLICT (id) DO NOTHING;`
+  ).catch(() => {});
+
+  // 6. Seed default Email Gateway config
+  await client.query(
+    `INSERT INTO email_configurations (id, tenant_id, active_provider, resend_api_key, resend_from_email, mailchimp_api_key, mailchimp_from_email, mailchimp_from_name, use_common_body, common_subject, common_body_template, updated_at)
+     VALUES ('default', 'default', 'smtp', '', 'onboarding@resend.dev', '', '', 'Accounts Department', false, 'Official Notice: Statement & Documents for {name}', 'Dear {name},\n\nPlease find attached the official documentation for your account.\n\nAccount Reference: {account_no}\n\nIf you have any questions or require additional support, reply directly to this email.\n\nBest regards,\nClient Services Team', NOW())
+     ON CONFLICT (id) DO NOTHING;`
+  ).catch(() => {});
+}
+
 export const FULL_SCHEMA_SQL = `
--- 1. Table: email_records
+-- Complete Unified Schema for reference and direct execution
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT DEFAULT 'default',
+  email TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  role TEXT DEFAULT 'company_user',
+  last_login_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS email_records (
   id TEXT PRIMARY KEY,
   tenant_id TEXT DEFAULT 'default',
@@ -283,7 +497,6 @@ CREATE TABLE IF NOT EXISTS email_records (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Table: smtp_configurations
 CREATE TABLE IF NOT EXISTS smtp_configurations (
   id TEXT PRIMARY KEY DEFAULT 'default',
   tenant_id TEXT DEFAULT 'default',
@@ -297,7 +510,6 @@ CREATE TABLE IF NOT EXISTS smtp_configurations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. Table: email_configurations
 CREATE TABLE IF NOT EXISTS email_configurations (
   id TEXT PRIMARY KEY DEFAULT 'default',
   tenant_id TEXT DEFAULT 'default',
@@ -313,18 +525,16 @@ CREATE TABLE IF NOT EXISTS email_configurations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Table: users
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE IF NOT EXISTS plans (
   id TEXT PRIMARY KEY,
-  tenant_id TEXT DEFAULT 'default',
-  email TEXT UNIQUE NOT NULL,
-  password TEXT NOT NULL,
-  role TEXT DEFAULT 'operator',
-  last_login_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  name TEXT NOT NULL,
+  price_monthly NUMERIC NOT NULL,
+  email_limit INTEGER NOT NULL,
+  features JSONB DEFAULT '[]'::jsonb,
+  is_active BOOLEAN DEFAULT true,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Table: tenants (Commercial Customers)
 CREATE TABLE IF NOT EXISTS tenants (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -338,7 +548,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   status TEXT DEFAULT 'active',
   monthly_fee NUMERIC DEFAULT 29.00,
   billing_status TEXT DEFAULT 'paid',
-  subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
+  subscription_renews_at TIMESTAMPTZ DEFAULT NOW(),
   smtp_host TEXT,
   smtp_port INTEGER DEFAULT 587,
   smtp_user TEXT,
@@ -350,110 +560,17 @@ CREATE TABLE IF NOT EXISTS tenants (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. Table: plans (SaaS Subscription Monetization)
-CREATE TABLE IF NOT EXISTS plans (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  price_monthly NUMERIC NOT NULL,
-  email_limit INTEGER NOT NULL,
-  features JSONB DEFAULT '[]'::jsonb,
-  is_active BOOLEAN DEFAULT true,
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Schema Migrations / Column Guarantees (Prevents column missing errors on existing databases)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'company_user';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 
 ALTER TABLE email_records ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
-
 ALTER TABLE smtp_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
-
 ALTER TABLE email_configurations ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'default';
-
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sender_name TEXT DEFAULT 'Accounts Dept';
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_id TEXT DEFAULT 'plan_standard';
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_quota INTEGER DEFAULT 2000;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS used_quota INTEGER DEFAULT 0;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT true;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC DEFAULT 29.00;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_status TEXT DEFAULT 'paid';
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days');
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_host TEXT;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 587;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_user TEXT;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_pass TEXT;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_sender_email TEXT;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS smtp_sender_name TEXT;
-ALTER TABLE tenants ADD COLUMN IF NOT EXISTS gateway_provider TEXT DEFAULT 'smtp';
 `;
 
-const SEED_DATA_SQL = `
--- Seed default SMTP config if empty
-INSERT INTO smtp_configurations (id, host, port, username, password, sender_email, sender_name, is_active, updated_at)
-VALUES (
-  'default',
-  'smtp-relay.brevo.com',
-  587,
-  'c03022001@smtp-brevo.com',
-  '',
-  'velavanvelavan790@gmail.com',
-  'CloudMail Team',
-  true,
-  NOW()
-)
-ON CONFLICT (id) DO NOTHING;
-
--- Seed default Email Gateway config if empty
-INSERT INTO email_configurations (id, active_provider, resend_api_key, resend_from_email, mailchimp_api_key, mailchimp_from_email, mailchimp_from_name, use_common_body, common_subject, common_body_template, updated_at)
-VALUES (
-  'default',
-  'smtp',
-  '',
-  'onboarding@resend.dev',
-  '',
-  '',
-  'Accounts Department',
-  false,
-  'Official Notice: Statement & Documents for {name}',
-  'Dear {name},\n\nPlease find attached the official documentation for your account.\n\nAccount Reference: {account_no}\n\nIf you have any questions or require additional support, reply directly to this email.\n\nBest regards,\nClient Services Team',
-  NOW()
-)
-ON CONFLICT (id) DO NOTHING;
-
--- Seed Default Platform Admin and Company Users
-INSERT INTO users (id, tenant_id, email, password, role, created_at)
-VALUES 
-  ('usr_admin_default', 'default', 'admin@enterprise.internal', 'admin123', 'administrator', NOW()),
-  ('usr_acme', 'tenant_acme', 'admin@acmecorp.com', 'admin123', 'company_user', NOW()),
-  ('usr_globex', 'tenant_globex', 'dispatch@globex.org', 'admin123', 'company_user', NOW()),
-  ('usr_apex', 'tenant_apex', 'billing@apexfinancial.com', 'admin123', 'company_user', NOW()),
-  ('usr_sterling', 'tenant_sterling', 'it@sterlinghealth.io', 'admin123', 'company_user', NOW()),
-  ('usr_nexus', 'tenant_nexus', 'ops@nexusretail.com', 'admin123', 'company_user', NOW()),
-  ('usr_vanguard', 'tenant_vanguard', 'leases@vanguardprop.com', 'admin123', 'company_user', NOW())
-ON CONFLICT (id) DO NOTHING;
-
--- Seed Plans
-INSERT INTO plans (id, name, price_monthly, email_limit, features)
-VALUES 
-  ('plan_starter', 'Starter Tier', 19.00, 2000, '["2,000 Verified Emails / Mo", "1 Custom Verified Domain", "XML & CSV Ingestion", "Standard Relay Access"]'::jsonb),
-  ('plan_standard', 'Standard Business', 29.00, 5000, '["5,000 Verified Emails / Mo", "3 Custom Verified Domains", "Automated PDF Attachments", "Priority Queue", "Detailed Delivery Logs"]'::jsonb),
-  ('plan_enterprise', 'Enterprise Tier', 49.00, 15000, '["15,000 Verified Emails / Mo", "Unlimited Verified Domains", "Dedicated High-Speed Relay", "Custom DKIM & SPF Alignment", "24/7 SLA Support"]'::jsonb)
-ON CONFLICT (id) DO NOTHING;
-
--- Seed Initial Corporate Tenants
-INSERT INTO tenants (id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota, domain_verified, status, monthly_fee, billing_status, subscription_renews_at, smtp_host, smtp_port, smtp_user, smtp_sender_email, smtp_sender_name, gateway_provider)
-VALUES
-  ('tenant_acme', 'Acme Global Manufacturing', 'admin@acmecorp.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'plan_standard', 2000, 1420, true, 'active', 29.00, 'paid', NOW() + INTERVAL '28 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'invoices@acmecorp.com', 'Acme Billing Team', 'smtp'),
-  ('tenant_globex', 'Globex Logistics International', 'dispatch@globex.org', 'statements@globex.org', 'Globex Accounts', 'plan_standard', 2000, 1850, true, 'active', 29.00, 'paid', NOW() + INTERVAL '19 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'statements@globex.org', 'Globex Accounts', 'smtp'),
-  ('tenant_apex', 'Apex Financial Partners', 'billing@apexfinancial.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'plan_enterprise', 5000, 3120, true, 'active', 49.00, 'paid', NOW() + INTERVAL '24 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'notices@apexfinancial.com', 'Apex Financial Notices', 'smtp'),
-  ('tenant_sterling', 'Sterling Healthcare Systems', 'it@sterlinghealth.io', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'plan_starter', 2000, 890, true, 'active', 19.00, 'paid', NOW() + INTERVAL '12 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'reports@sterlinghealth.io', 'Sterling Patient Reports', 'smtp'),
-  ('tenant_nexus', 'Nexus Direct Retail Network', 'ops@nexusretail.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'plan_standard', 2000, 1200, false, 'pending_dns', 29.00, 'paid', NOW() + INTERVAL '29 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'orders@nexusretail.com', 'Nexus Dispatch', 'smtp'),
-  ('tenant_vanguard', 'Vanguard Property Holdings', 'leases@vanguardprop.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'plan_standard', 2000, 1640, true, 'active', 29.00, 'paid', NOW() + INTERVAL '22 days', 'smtp-relay.brevo.com', 587, 'c03022001@smtp-brevo.com', 'rent@vanguardprop.com', 'Vanguard Statements', 'smtp')
-ON CONFLICT (id) DO NOTHING;
-`;
+const SEED_DATA_SQL = ``;
 
 function getPool(customConnStr = "") {
   const conn = (customConnStr || process.env.DATABASE_URL || "").trim();
@@ -527,7 +644,7 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action");
-    const tenantId = searchParams.get("tenantId") || "";
+    const tenantId = searchParams.get("tenantId") || req.headers.get("x-tenant-id") || "";
     const headerConn = req.headers.get("x-database-url") || "";
     const queryConn = searchParams.get("connectionString") || "";
     connStr = (queryConn || headerConn).trim();
@@ -539,15 +656,15 @@ export async function GET(req) {
       if (pool) {
         const client = await pool.connect();
         try {
-          await client.query(FULL_SCHEMA_SQL);
-          await client.query(SEED_DATA_SQL);
+          await runSchemaMigrations(client);
+          await seedDefaultData(client);
 
-          const recordsCount = await client.query("SELECT COUNT(*) FROM email_records;");
-          const smtpCount = await client.query("SELECT COUNT(*) FROM smtp_configurations;");
-          const emailConfigCount = await client.query("SELECT COUNT(*) FROM email_configurations;");
-          const usersCount = await client.query("SELECT COUNT(*) FROM users;");
-          const tenantsCount = await client.query("SELECT COUNT(*) FROM tenants;");
-          const plansCount = await client.query("SELECT COUNT(*) FROM plans;");
+          const recordsCount = await client.query("SELECT COUNT(*) FROM email_records;").catch(() => ({ rows: [{ count: 0 }] }));
+          const smtpCount = await client.query("SELECT COUNT(*) FROM smtp_configurations;").catch(() => ({ rows: [{ count: 0 }] }));
+          const emailConfigCount = await client.query("SELECT COUNT(*) FROM email_configurations;").catch(() => ({ rows: [{ count: 0 }] }));
+          const usersCount = await client.query("SELECT COUNT(*) FROM users;").catch(() => ({ rows: [{ count: 0 }] }));
+          const tenantsCount = await client.query("SELECT COUNT(*) FROM tenants;").catch(() => ({ rows: [{ count: 0 }] }));
+          const plansCount = await client.query("SELECT COUNT(*) FROM plans;").catch(() => ({ rows: [{ count: 0 }] }));
 
           return NextResponse.json({
             success: true,
@@ -583,7 +700,7 @@ export async function GET(req) {
       if (pool) {
         const client = await pool.connect();
         try {
-          await client.query(FULL_SCHEMA_SQL);
+          await runSchemaMigrations(client);
 
           const tenantsRes = await client.query("SELECT * FROM tenants ORDER BY created_at DESC;");
           const plansRes = await client.query("SELECT * FROM plans ORDER BY price_monthly ASC;");
@@ -671,13 +788,13 @@ export async function GET(req) {
     if (pool) {
       const client = await pool.connect();
       try {
-        await client.query(FULL_SCHEMA_SQL);
+        await runSchemaMigrations(client);
 
-        // Filter by tenant if provided
+        // Filter by tenant if provided (strict multi-tenant isolation)
         let querySql = "SELECT * FROM email_records ORDER BY created_at DESC;";
         let params = [];
         if (tenantId && tenantId !== "all") {
-          querySql = "SELECT * FROM email_records WHERE tenant_id = $1 OR tenant_id = 'default' ORDER BY created_at DESC;";
+          querySql = "SELECT * FROM email_records WHERE tenant_id = $1 ORDER BY created_at DESC;";
           params = [tenantId];
         }
 
@@ -737,10 +854,14 @@ export async function GET(req) {
     }
 
     const storage = readStorage();
+    let records = storage.records || DEFAULT_CLOUD_RECORDS;
+    if (tenantId && tenantId !== "all") {
+      records = records.filter((r) => r.tenant_id === tenantId);
+    }
     return NextResponse.json({
       success: true,
-      count: storage.records?.length || 0,
-      records: storage.records || [],
+      count: records.length,
+      records,
       smtpConfig: storage.smtpConfig ? {
         host: storage.smtpConfig.host,
         port: storage.smtpConfig.port.toString(),
@@ -806,15 +927,15 @@ export async function POST(req) {
 
       const client = await pool.connect();
       try {
-        await client.query(FULL_SCHEMA_SQL);
-        await client.query(SEED_DATA_SQL);
+        await runSchemaMigrations(client);
+        await seedDefaultData(client);
 
-        const recordsCount = await client.query("SELECT COUNT(*) FROM email_records;");
-        const smtpCount = await client.query("SELECT COUNT(*) FROM smtp_configurations;");
-        const emailConfigCount = await client.query("SELECT COUNT(*) FROM email_configurations;");
-        const usersCount = await client.query("SELECT COUNT(*) FROM users;");
-        const tenantsCount = await client.query("SELECT COUNT(*) FROM tenants;");
-        const plansCount = await client.query("SELECT COUNT(*) FROM plans;");
+        const recordsCount = await client.query("SELECT COUNT(*) FROM email_records;").catch(() => ({ rows: [{ count: 0 }] }));
+        const smtpCount = await client.query("SELECT COUNT(*) FROM smtp_configurations;").catch(() => ({ rows: [{ count: 0 }] }));
+        const emailConfigCount = await client.query("SELECT COUNT(*) FROM email_configurations;").catch(() => ({ rows: [{ count: 0 }] }));
+        const usersCount = await client.query("SELECT COUNT(*) FROM users;").catch(() => ({ rows: [{ count: 0 }] }));
+        const tenantsCount = await client.query("SELECT COUNT(*) FROM tenants;").catch(() => ({ rows: [{ count: 0 }] }));
+        const plansCount = await client.query("SELECT COUNT(*) FROM plans;").catch(() => ({ rows: [{ count: 0 }] }));
 
         return NextResponse.json({
           success: true,
@@ -862,7 +983,7 @@ export async function POST(req) {
       if (pool) {
         const client = await pool.connect();
         try {
-          await client.query(FULL_SCHEMA_SQL);
+          await runSchemaMigrations(client);
           await client.query(
             `INSERT INTO tenants (
               id, name, contact_email, sender_email, sender_name, plan_id, monthly_quota, used_quota,
@@ -918,15 +1039,26 @@ export async function POST(req) {
             ).catch((e) => console.warn("SMTP config sync notice:", e.message));
           }
 
-          // Auto-provision Company User account for instant client login
+          const rawPassword = (tenant.password || tenant.initial_password || "").trim();
+          const initialPassword = rawPassword || "admin123";
+
+          // Auto-provision Company User account with initial/custom password
           await client.query(
             `INSERT INTO users (id, tenant_id, email, password, role, created_at)
              VALUES ($1, $2, $3, $4, 'company_user', NOW())
              ON CONFLICT (id) DO UPDATE SET
                tenant_id = EXCLUDED.tenant_id,
-               email = EXCLUDED.email;`,
-            [`usr_${id}`, id, contactEmail, "admin123"]
+               email = EXCLUDED.email,
+               password = CASE WHEN EXCLUDED.password IS NOT NULL AND EXCLUDED.password != '' THEN EXCLUDED.password ELSE users.password END;`,
+            [`usr_${id}`, id, contactEmail, initialPassword]
           ).catch((e) => console.warn("Auto-user provision notice:", e.message));
+
+          if (rawPassword) {
+            await client.query(
+              `UPDATE users SET password = $1 WHERE tenant_id = $2 OR LOWER(email) = $3;`,
+              [rawPassword, id, contactEmail]
+            ).catch(() => {});
+          }
 
           return NextResponse.json({
             success: true,
@@ -936,7 +1068,7 @@ export async function POST(req) {
               smtp_host: smtpHost, smtp_port: smtpPort, smtp_user: smtpUser, smtp_sender_email: smtpSenderEmail,
               smtp_sender_name: smtpSenderName, gateway_provider: gatewayProvider
             },
-            message: `Customer '${name}' successfully onboarded to Supabase with company credentials and gateway configuration!`,
+            message: `Customer '${name}' successfully onboarded with portal credentials and email gateway configuration!`,
           });
         } finally {
           client.release();
@@ -945,6 +1077,8 @@ export async function POST(req) {
 
       const storage = readStorage();
       const tenants = storage.tenants || DEFAULT_TENANTS;
+      const rawPassword = (tenant.password || tenant.initial_password || "").trim();
+      const initialPassword = rawPassword || "admin123";
       const existingIdx = tenants.findIndex((t) => t.id === id);
       const newTenant = {
         id,
@@ -974,13 +1108,64 @@ export async function POST(req) {
       } else {
         tenants.unshift(newTenant);
       }
-      writeStorage({ tenants });
+      
+      const users = storage.users || [];
+      const uIdx = users.findIndex(u => u.tenant_id === id || (u.email && u.email.toLowerCase() === contactEmail));
+      if (uIdx >= 0) {
+        if (rawPassword) users[uIdx].password = rawPassword;
+        users[uIdx].email = contactEmail;
+        users[uIdx].tenant_id = id;
+      } else {
+        users.push({ id: `usr_${id}`, tenant_id: id, email: contactEmail, password: initialPassword, role: 'company_user' });
+      }
+      writeStorage({ tenants, users });
 
       return NextResponse.json({
         success: true,
         tenant: newTenant,
-        message: `Customer '${name}' saved with gateway configuration.`,
+        message: `Customer '${name}' saved with portal credentials and gateway configuration.`,
       });
+    }
+
+    // 2.5 ACTION: Customer Change Password
+    if (action === "change_password") {
+      const { tenantId, email, newPassword } = body;
+      const cleanPass = (newPassword || "").trim();
+      if (cleanPass.length < 6) {
+        return NextResponse.json({ error: "Password must be at least 6 characters long." }, { status: 400 });
+      }
+
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query(
+            `UPDATE users SET password = $1 WHERE (tenant_id = $2 OR LOWER(email) = LOWER($3));`,
+            [cleanPass, tenantId || "", email || ""]
+          );
+          return NextResponse.json({ success: true, message: "Password updated successfully in database." });
+        } finally {
+          client.release();
+        }
+      }
+
+      const storage = readStorage();
+      const users = storage.users || [];
+      const user = users.find(
+        (u) => (tenantId && u.tenant_id === tenantId) || (email && (u.email || "").toLowerCase() === (email || "").toLowerCase())
+      );
+      if (user) {
+        user.password = cleanPass;
+      } else {
+        users.push({
+          id: `usr_${tenantId || Date.now()}`,
+          tenant_id: tenantId || "custom",
+          email: email || "",
+          password: cleanPass,
+          role: "company_user",
+        });
+      }
+      writeStorage({ users });
+      return NextResponse.json({ success: true, message: "Password updated successfully!" });
     }
 
     // 3. ACTION: Delete Tenant / Customer
@@ -1051,7 +1236,7 @@ export async function POST(req) {
       if (pool) {
         const client = await pool.connect();
         try {
-          await client.query(FULL_SCHEMA_SQL);
+          await runSchemaMigrations(client);
           await client.query(
             `INSERT INTO smtp_configurations (id, host, port, username, password, sender_email, sender_name, is_active, updated_at)
              VALUES ('default', $1, $2, $3, $4, $5, $6, true, NOW())
@@ -1111,7 +1296,7 @@ export async function POST(req) {
       if (pool) {
         const client = await pool.connect();
         try {
-          await client.query(FULL_SCHEMA_SQL);
+          await runSchemaMigrations(client);
           await client.query(
             `INSERT INTO email_configurations (id, active_provider, resend_api_key, resend_from_email, mailchimp_api_key, mailchimp_from_email, mailchimp_from_name, use_common_body, common_subject, common_body_template, updated_at)
              VALUES ('default', $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
@@ -1168,10 +1353,10 @@ export async function POST(req) {
       if (pool) {
         const client = await pool.connect();
         try {
-          // 1. Run schema and migrations first
-          await client.query(FULL_SCHEMA_SQL).catch((err) => console.warn("Schema migration notice:", err.message));
+          // 1. Run resilient schema migrations (guarantees users.tenant_id, etc. exist)
+          await runSchemaMigrations(client);
           // 2. Run seed data safely
-          await client.query(SEED_DATA_SQL).catch((err) => console.warn("Seed data notice:", err.message));
+          await seedDefaultData(client);
           const userRes = await client.query(
             "SELECT * FROM users WHERE LOWER(email) = $1 LIMIT 1;",
             [email]
@@ -1179,21 +1364,26 @@ export async function POST(req) {
           let user = userRes.rows[0];
 
           // Auto-link known tenant email if user record missing
-          if (!user && password === "admin123") {
+          if (!user) {
             if (email === "admin@enterprise.internal") {
-              user = { id: "usr_admin_default", tenant_id: "default", email, role: "administrator" };
+              user = { id: "usr_admin_default", tenant_id: "default", email, role: "administrator", password: "admin123" };
             } else {
               const tRes = await client.query(
                 "SELECT * FROM tenants WHERE LOWER(contact_email) = $1 OR LOWER(sender_email) = $1 LIMIT 1;",
                 [email]
               );
               if (tRes.rows[0]) {
-                user = { id: `usr_${tRes.rows[0].id}`, tenant_id: tRes.rows[0].id, email, role: "company_user" };
+                user = { id: `usr_${tRes.rows[0].id}`, tenant_id: tRes.rows[0].id, email, role: "company_user", password: "admin123" };
               }
             }
           }
 
-          if (user && (user.password === password || password === "admin123")) {
+          if (user && !user.tenant_id) {
+            user.tenant_id = "default";
+          }
+
+          const isValidAuth = user && (user.password ? user.password === password : password === "admin123");
+          if (user && isValidAuth) {
             if (user.id && !user.id.startsWith("usr_dynamic")) {
               await client.query("UPDATE users SET last_login_at = NOW() WHERE id = $1;", [user.id]).catch(() => {});
             }
@@ -1211,7 +1401,7 @@ export async function POST(req) {
             // B. Company Client Account
             const tenantRes = await client.query(
               "SELECT * FROM tenants WHERE id = $1 OR LOWER(contact_email) = $2 LIMIT 1;",
-              [user.tenant_id, email]
+              [user.tenant_id || "", email]
             );
             const tenant = tenantRes.rows[0] || {
               id: user.tenant_id || "tenant_custom",
@@ -1258,16 +1448,24 @@ export async function POST(req) {
       }
 
       const storage = readStorage();
+      const storageUsers = storage.users || [];
+      const storedUser = storageUsers.find((u) => (u.email || "").toLowerCase() === email);
       const demoTenants = storage.tenants || DEFAULT_TENANTS;
       const matchedTenant = demoTenants.find(
         (t) => (t.contact_email || "").toLowerCase() === email || (t.sender_email || "").toLowerCase() === email
       );
 
-      if (matchedTenant && (password === "admin123" || password.length > 0)) {
+      if (matchedTenant) {
+        if (storedUser && storedUser.password) {
+          if (storedUser.password !== password) {
+            return NextResponse.json({ error: "Invalid password. Please check your credentials." }, { status: 401 });
+          }
+        }
+
         return NextResponse.json({
           success: true,
           userType: "company",
-          user: { id: `usr_${matchedTenant.id}`, email, role: "company_user", tenant_id: matchedTenant.id },
+          user: { id: storedUser?.id || `usr_${matchedTenant.id}`, email, role: "company_user", tenant_id: matchedTenant.id },
           tenant: matchedTenant,
           redirect: "/",
         });
@@ -1340,11 +1538,12 @@ export async function POST(req) {
     if (pool) {
       const client = await pool.connect();
       try {
-        await client.query(FULL_SCHEMA_SQL);
+        await runSchemaMigrations(client);
 
+        const activeTenantId = body.tenant_id || tenantId || "";
         for (const rec of records) {
           const recId = rec.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          const recTenantId = rec.tenant_id || "default";
+          const recTenantId = rec.tenant_id || activeTenantId || "default";
           const extraFields = rec.extra_fields ? JSON.stringify(rec.extra_fields) : "{}";
           const sentAt = rec.sent_at ? new Date(rec.sent_at) : null;
           const createdAt = rec.created_at ? new Date(rec.created_at) : new Date();
@@ -1405,8 +1604,18 @@ export async function POST(req) {
       }
     }
 
-    // Fallback to local storage
-    writeStorage({ records });
+    // Fallback to local storage (strictly isolating records per tenant)
+    const storage = readStorage();
+    const activeTenantId = body.tenant_id || tenantId || "";
+    let currentRecords = storage.records || DEFAULT_CLOUD_RECORDS;
+    if (activeTenantId) {
+      const otherRecords = currentRecords.filter((r) => r.tenant_id !== activeTenantId);
+      const taggedNew = records.map((r) => ({ ...r, tenant_id: activeTenantId }));
+      currentRecords = [...taggedNew, ...otherRecords];
+    } else {
+      currentRecords = records;
+    }
+    writeStorage({ records: currentRecords });
 
     return NextResponse.json({
       success: true,
