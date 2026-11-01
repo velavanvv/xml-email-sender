@@ -630,6 +630,9 @@ function writeStorage(payload) {
 
 function getSupabaseSuggestion(err, connStr = "") {
   const msg = (err?.message || "").toLowerCase();
+  if (msg.includes("password authentication failed")) {
+    return "🔑 Supabase Database Password Error: The database password in your connection string is incorrect, or special characters in the password need URL-encoding (e.g. '@' -> '%40', '#' -> '%23'). You can reset your database password anytime in Supabase Dashboard -> Project Settings -> Database -> Database Password.";
+  }
   if (err?.code === "SUPABASE_IPV6_DIRECT_NOT_SUPPORTED" || msg.includes("enotfound") || msg.includes("getaddrinfo") || connStr.includes("db.")) {
     return "⚠️ IPv6 Direct connection (db.[ref].supabase.co) is not supported by Vercel serverless! In Supabase Dashboard -> Project Settings -> Database, under 'Connection string', switch to 'Connection Pooling' (host: aws-0-[region].pooler.supabase.com:6543 or 5432) and copy the Pooler URI.";
   }
